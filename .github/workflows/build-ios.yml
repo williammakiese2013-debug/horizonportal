@@ -1,0 +1,47 @@
+name: Build Unsigned iOS IPA
+
+on:
+  workflow_dispatch: # Permet de lancer le build manuellement sur GitHub
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-size: 20
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Sync Capacitor
+        run: npx cap sync ios
+
+      - name: Build Xcode Project (Unsigned)
+        run: |
+          xcodebuild -workspace ios/App/App.xcworkspace \
+                     -scheme App \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     -derivedDataPath build \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGN_IDENTITY="" \
+                     clean build
+
+      - name: Create IPA Package
+        run: |
+          mkdir Payload
+          cp -r build/Build/Products/Release-iphoneos/App.app Payload/
+          zip -r App.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: horizonportal-sideload
+          path: App.ipa
