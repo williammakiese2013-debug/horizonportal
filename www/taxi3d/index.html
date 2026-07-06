@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Taxi 3D Realistic</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<canvas id="game-canvas"></canvas>
+
+<div id="minimap"><canvas id="minimap-canvas" width="100" height="100"></canvas></div>
+<div id="time-display">12:00</div>
+<div id="hand-status" style="position:fixed;top:16px;right:130px;z-index:10;color:#0f0;font-size:12px;text-shadow:0 1px 4px rgba(0,0,0,.8);background:rgba(0,0,0,.4);padding:3px 8px;border-radius:6px;backdrop-filter:blur(4px);pointer-events:none;display:none">✋</div>
+
+<div id="hud">
+  <div class="hud-row">
+    <div id="speed-display">0 <small>km/h</small></div>
+    <div id="rpm-bar"><div id="rpm-fill"></div></div>
+    <div id="passenger-display">🧑 ×<span id="pax-count">0</span></div>
+    <div id="money-display">💰 $<span id="money-val">0</span></div>
+  </div>
+</div>
+
+<div id="steer-zone"></div>
+<div id="pedal-zone">
+  <div id="pedal-gas">ACCEL</div>
+  <div id="pedal-brake">FREIN</div>
+</div>
+
+<div id="controls-ui">
+  <button id="btn-horn">📯</button>
+  <button id="btn-view">👁️</button>
+  <button id="btn-lights">💡</button>
+</div>
+
+<div id="toast"></div>
+<canvas id="hand-overlay" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:3;pointer-events:none;opacity:.5;display:none"></canvas>
+<div id="loading" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;color:#fff;font-size:24px;text-shadow:0 2px 8px rgba(0,0,0,.8);font-weight:600;text-align:center">
+  <div style="font-size:48px;margin-bottom:12px">🚕</div>
+  Taxi 3D<br>
+  <span style="font-size:14px;opacity:.7">Génération de la ville...</span>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

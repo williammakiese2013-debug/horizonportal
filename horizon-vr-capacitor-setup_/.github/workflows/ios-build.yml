@@ -1,0 +1,61 @@
+name: Build iOS IPA (unsigned)
+
+on:
+  workflow_dispatch:   # bouton "Run workflow" manuel sur GitHub
+  push:
+    branches: [ main ]
+
+jobs:
+  build-ios:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout du repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Installer les dépendances npm
+        run: npm install
+
+      - name: Ajouter la plateforme iOS (si pas déjà présente)
+        run: |
+          if [ ! -d "ios" ]; then
+            npx cap add ios
+          fi
+
+      - name: Sync Capacitor -> iOS
+        run: npx cap sync ios
+
+      - name: Installer les pods CocoaPods
+        run: |
+          cd ios/App
+          pod install
+
+      - name: Build archive Xcode (non signé)
+        run: |
+          cd ios/App
+          xcodebuild -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath $PWD/build/App.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            archive
+
+      - name: Créer un .ipa depuis l'archive (non signé)
+        run: |
+          cd ios/App/build/App.xcarchive/Products/Applications
+          mkdir Payload
+          cp -r *.app Payload/
+          zip -r ../../../App-unsigned.ipa Payload
+
+      - name: Upload de l'artifact .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: horizon-vr-portal-unsigned-ipa
+          path: ios/App/build/App-unsigned.ipa

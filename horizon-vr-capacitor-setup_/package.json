@@ -1,0 +1,24 @@
+{
+  "name": "horizon-vr-portal",
+  "version": "1.0.0",
+  "description": "Horizon VR Portal - Système d'exploitation VR avec hand tracking",
+  "main": "index.html",
+  "scripts": {
+    "cap:sync": "npx cap sync",
+    "cap:add:android": "npx cap add android",
+    "cap:add:ios": "npx cap add ios",
+    "cap:open:android": "npx cap open android",
+    "cap:open:ios": "npx cap open ios"
+  },
+  "author": "",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/browser": "^6.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2",
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/ios": "^6.1.2"
+  }
+}

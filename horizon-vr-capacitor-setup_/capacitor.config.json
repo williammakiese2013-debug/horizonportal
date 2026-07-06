@@ -1,0 +1,14 @@
+{
+  "appId": "com.horizon.vrportal",
+  "appName": "Horizon VR Portal",
+  "webDir": ".",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "Browser": {
+      "presentationStyle": "fullscreen"
+    }
+  }
+}

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Web Hero — Le Fil de Prime</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #0b0e14;
+      overscroll-behavior: none;
+      touch-action: none;
+    }
+    canvas { display: block; }
+    #hud {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      color: #e5e7eb;
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      background: rgba(10, 12, 18, 0.55);
+      padding: 8px 12px;
+      border-radius: 8px;
+      pointer-events: none;
+      line-height: 1.5;
+    }
+    #crosshair {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      width: 6px;
+      height: 6px;
+      margin: -3px 0 0 -3px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.85);
+      box-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
+      pointer-events: none;
+      transition: background 0.1s, box-shadow 0.1s, transform 0.1s;
+    }
+    #crosshair.can-anchor {
+      background: rgba(55, 224, 255, 0.95);
+      box-shadow: 0 0 8px rgba(55, 224, 255, 0.85);
+      transform: scale(1.4);
+    }
+    #webBtn {
+      display: none;
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      width: 84px;
+      height: 84px;
+      border-radius: 50%;
+      background: rgba(20, 22, 30, 0.55);
+      border: 2px solid rgba(255, 255, 255, 0.4);
+      color: #f4f4f4;
+      font-size: 30px;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      z-index: 30;
+      cursor: pointer;
+    }
+    #webBtn.active {
+      background: rgba(244, 244, 244, 0.35);
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    Clique dans la fenêtre pour entrer en vue première personne<br />
+    ZQSD / WASD : se déplacer — Souris : regarder — Maj : courir<br />
+    Espace : sauter (au sol) / lâcher la toile (en swing) / annuler un zip<br />
+    Clic gauche (ou 🕸) vers un immeuble : tirer une toile et swinguer — re-clique en plein vol pour enchaîner<br />
+    Clic droit ou E : zip, un tir-grappin qui te tire directement vers le point visé<br />
+    F : frapper (Mode Histoire)
+  </div>
+  <div id="crosshair"></div>
+  <div id="webBtn" title="Tirer une toile">🕸</div>
+
+  <!-- Overlay debug du squelette de la main (caméra arrière) -->
+  <canvas id="hand-overlay" style="position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:25;display:none;"></canvas>
+  <div id="hand-status" style="position:fixed;top:12px;right:12px;color:#0f0;font-family:monospace;font-size:13px;background:rgba(10,12,18,0.55);padding:6px 10px;border-radius:8px;pointer-events:none;z-index:26;display:none;"></div>
+
+  <!-- Le Mode Cardboard (écran splitté stéréo) est actif en permanence dès le lancement.
+       Ce bouton ne sert plus qu'à réessayer d'activer le suivi de main si la permission
+       caméra a été refusée au démarrage. -->
+  <button id="cardboardBtn" title="Réessayer le suivi de main (Mode Cardboard)" style="position:fixed;left:24px;bottom:24px;width:64px;height:64px;border-radius:50%;background:rgba(20,22,30,0.55);border:2px solid rgba(255,255,255,0.4);color:#f4f4f4;font-size:26px;z-index:30;cursor:pointer;">🕶️</button>
+
+  <!-- Import map : Three.js + ses addons (contrôles pointer lock) depuis un CDN -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
