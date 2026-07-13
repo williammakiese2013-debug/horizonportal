@@ -47,7 +47,6 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
-</dict>
 <key>NSCameraUsageDescription</key>
 <string>Horizon VR a besoin de la caméra pour le suivi des mains.</string>
 <key>UIFileSharingEnabled</key>
