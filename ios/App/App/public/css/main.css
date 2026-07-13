@@ -117,6 +117,35 @@
   .gaze-cursor.hand-point{background:rgba(120,200,255,.5);box-shadow:0 0 0 2px rgba(120,200,255,.7)}
   .gaze-cursor.hand-curl{background:rgba(255,200,50,.55);box-shadow:0 0 0 3px rgba(255,200,50,.8),0 0 16px 6px rgba(255,200,50,.3);border-color:rgba(255,200,50,.95);transform:translate(-50%,-50%) scale(0.85);transition:transform .1s ease,background .1s ease}
   .gaze-cursor.hand-curl svg circle{stroke:rgba(255,200,50,.95)!important}
+
+  /* ===== Icônes de poignet (façon Meta Quest hand-tracking) =====
+     Suivent chaque main détectée (gauche → ☰ menu, droite → ∞ réglages
+     rapides), à la manière du menu universel Quest qui s'affiche près du
+     poignet quand la main est levée devant soi. Positionnées en absolu
+     (comme .gaze-cursor) via left/top px calculés à chaque frame de rendu
+     dans hand-tracking-vision.js ; cachées tant qu'aucune main labellisée
+     n'est détectée. Un pincement (pouce+index) de la main correspondante
+     déclenche l'action. */
+  .wrist-icon{
+    position:absolute;top:0;left:0;
+    width:38px;height:38px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:16px;color:rgba(255,255,255,.92);
+    background:rgba(20,20,24,.55);
+    border:1px solid rgba(255,255,255,.28);
+    box-shadow:0 4px 14px -4px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.18);
+    backdrop-filter:blur(10px) saturate(140%);
+    -webkit-backdrop-filter:blur(10px) saturate(140%);
+    opacity:0;transform:translate(-50%,-50%) scale(.7);
+    transition:opacity .15s ease, transform .15s ease, background .15s ease, box-shadow .15s ease;
+    pointer-events:none;z-index:55;
+  }
+  .wrist-icon.visible{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  .wrist-icon.wrist-icon-armed{
+    background:rgba(255,155,41,.55);border-color:rgba(255,190,110,.9);
+    box-shadow:0 0 0 3px rgba(255,155,41,.35),0 4px 14px -4px rgba(0,0,0,.6);
+    transform:translate(-50%,-50%) scale(1.12);
+  }
   .hud-wrap{position:absolute;inset:0;perspective:1000px;transform-style:preserve-3d;will-change:transform;pointer-events:none;z-index:10}
   .hud-wrap.interactive{pointer-events:auto}
   /* ===== APPLE MUSIC ===== */
@@ -412,6 +441,28 @@
   .app-window.light-mode .app-window-header{border-bottom:1px solid rgba(0,0,0,0.1);}
   .app-window.light-mode .app-window-title{color:#1c1c1e;}
   .app-window.light-mode .app-window-close{color:#8e8e93;}
+
+  /* === "Vraie tablette" posée sur le bureau (mode tablette) ===
+     Bordure épaisse type bezel, coins bien arrondis, petit point caméra
+     en haut, et une ombre portée large pour donner l'impression qu'elle
+     repose physiquement sur le bureau du décor (voir setTabletRoomSky). */
+  .cg-tablet-shell{
+    border-radius:34px;
+    border:10px solid #16181d;
+    background:#0b0c0f;
+    box-shadow:
+      0 2px 0 1px rgba(255,255,255,0.05) inset,
+      0 40px 70px -20px rgba(0,0,0,0.65),
+      0 14px 26px -8px rgba(0,0,0,0.55);
+  }
+  .cg-tablet-shell .app-window-header{border-radius:22px 22px 0 0}
+  .cg-tablet-shell .customgame-frame{border-radius:0}
+  .cg-tablet-camera-dot{
+    position:absolute; top:-6px; left:50%; transform:translateX(-50%);
+    width:7px; height:7px; border-radius:50%;
+    background:#3a3d45; box-shadow:0 0 0 2px #16181d;
+    z-index:5;
+  }
 
   /* === Navigateur Safari === */
   .browser-bar{display:flex;gap:6px;padding:8px 10px;flex-wrap:wrap;border-bottom:1px solid var(--glass-border);
@@ -1165,7 +1216,7 @@
     font-size: 13px; letter-spacing:.5px;
   }
   .launchpad-tabs{
-    display:flex; gap:10px; margin-top:10px; margin-bottom:6px;
+    display:flex; gap:10px; margin-bottom:6px;
   }
   .launchpad-tab{
     display:flex; align-items:center; gap:8px;
@@ -1268,6 +1319,9 @@
   .lib-tile-add .lib-tile-ico{
     background:rgba(255,255,255,.04); border:1px dashed rgba(255,255,255,.3);
     color:rgba(255,255,255,.6);
+  }
+  .lib-tile-cinema .lib-tile-ico{
+    background:rgba(127,60,220,.12); border:1px solid rgba(170,120,255,.35);
   }
   .lib-tile-del{
     position:absolute; top:2px; right:6px; width:20px; height:20px;
@@ -1770,6 +1824,39 @@
     background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);
     display:flex;align-items:center;justify-content:center;
     font-size:13px;cursor:pointer;
+  }
+
+  /* === Stylet posé à côté de la tablette (mode tablette) === */
+  .cg-stylus-dock{
+    position:absolute; right:-46px; top:50%; transform:translateY(-50%) rotate(35deg);
+    width:34px;height:34px;border-radius:10px;
+    background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.22);
+    display:flex;align-items:center;justify-content:center;
+    font-size:17px;cursor:pointer;z-index:6;
+    box-shadow:0 6px 14px -4px rgba(0,0,0,0.5);
+    transition:background .15s,transform .15s,opacity .15s;
+  }
+  .cg-stylus-dock:hover, .cg-stylus-dock[data-gaze-active="true"]{
+    background:rgba(127,233,255,0.22);border-color:rgba(127,233,255,0.5);
+  }
+  .cg-stylus-dock.held{ opacity:.35; }
+  /* Pointe du stylet quand il est en main : suit le curseur (regard/main),
+     positionnée en JS (custom-game-controls.js) — voir #cgStylusTip. */
+  #cgStylusTip{
+    position:fixed; top:0; left:0; width:26px; height:26px;
+    margin:-13px 0 0 -13px; font-size:20px; line-height:26px; text-align:center;
+    pointer-events:none; z-index:99997; display:none;
+    filter:drop-shadow(0 2px 4px rgba(0,0,0,0.6));
+    transition:transform .06s ease;
+  }
+  #cgStylusTip.cg-stylus-clicking{ transform:scale(0.8); }
+  /* Fil qui relie le stylet (dans la main) à l'écran de la tablette. */
+  #cgStylusTether{
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    pointer-events:none; z-index:99996; display:none;
+  }
+  #cgStylusTether line{
+    stroke:rgba(127,233,255,0.55); stroke-width:2; stroke-dasharray:4 5;
   }
 
 

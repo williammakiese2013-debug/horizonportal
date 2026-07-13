@@ -2,5 +2,7 @@
 	"appId": "com.jums.horizonportal",
 	"appName": "Horizon Portal",
 	"webDir": "www",
-	"packageClassList": []
+	"packageClassList": [
+		"FilesystemPlugin"
+	]
 }

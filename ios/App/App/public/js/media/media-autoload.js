@@ -111,6 +111,17 @@ function thumbHtml(item, small){
 }
 
 function buildDockHTML(){
+  // Ce grand panneau "écran d'accueil" (grille Apps + Now Playing + onglets
+  // Galerie/Scènes/VR Meet Up/Divertissement) a été retiré : il flottait en
+  // permanence devant l'utilisateur et faisait doublon avec la petite barre
+  // du bas (buildAppDockHTML) et le Launchpad. Seule la barre du bas reste
+  // désormais pour lancer les apps ; le contenu Galerie/Scènes/VR Meet
+  // Up/Divertissement a été déplacé dans le Launchpad, onglet "Galerie"
+  // (voir buildLaunchpadGalerieHTML dans settings.js).
+  return '';
+}
+
+function buildDockHTML_LEGACY_UNUSED(){
   const vhTab = state.vhHomeTab || 'galerie';
 
   // Apps grille - icônes de la barre du bas, rondes

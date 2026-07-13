@@ -42,7 +42,15 @@ function showFilePicker(inputId, attrKey, attrVal, label){
   overlay.appendChild(popup);
   document.body.appendChild(overlay);
 
-  lbl.addEventListener('click', ()=> setTimeout(()=>{ overlay.remove(); }, 500));
+  lbl.addEventListener('click', (e)=>{
+    if(window.NativeMediaFolder && window.NativeMediaFolder.available()){
+      e.preventDefault();
+      overlay.remove();
+      NativeMediaFolder.openFor(inp);
+    } else {
+      setTimeout(()=>{ overlay.remove(); }, 500);
+    }
+  });
   cancel.addEventListener('click', ()=> overlay.remove());
   overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
 }
@@ -127,8 +135,6 @@ function handleAction(action){
 
   if(action.startsWith('app:')){
     const appId = action.slice(4);
-    state.activeApp = appId;
-    state.launchpadOpen = false;
     const calibPanel = document.getElementById('calibPanel');
     if(calibPanel) calibPanel.classList.remove('open');
     state.menuHidden = false;
@@ -148,8 +154,25 @@ function handleAction(action){
       // Sync le clavier du bas avec l'URL courante
       state.safariKbText = state.browserState.currentUrl || '';
     }
+    // On lance l'app À CÔTÉ du menu (Launchpad/Library restent ouverts et
+    // utilisables) plutôt que de tout remplacer par une seule fenêtre modale
+    // — c'est le système "Multitâche" déjà existant, simplement déclenché
+    // directement par un clic d'icône : jusqu'à 5 apps peuvent ainsi
+    // tourner en même temps, chacune dans sa propre fenêtre.
+    state.activeApp = null;
+    if(!state.multiTaskSlots.find(s => s.appId === appId)){
+      if(state.multiTaskSlots.length >= 5){
+        toast('⚠️ 5 fenêtres ouvertes maximum — fermez-en une pour en ouvrir une autre');
+      } else {
+        if(!state.multiTaskMode || state.multiTaskSlots.length === 0){
+          state.multiTaskAnchorYaw = (typeof camL!=='undefined' && camL && camL.object3D ? camL.object3D.rotation.y : 0) + (state.initYaw || 0);
+        }
+        state.multiTaskMode = true;
+        state.multiTaskSlots.push({appId, offX:0, offY:0});
+      }
+    }
     renderHUD();
-    toast('📱 ' + APPS.find(a=>a.id===appId)?.name || appId);
+    toast('📱 ' + (APPS.find(a=>a.id===appId)?.name || appId) + ' ouvert');
     return;
   }
   if(action==='openLaunchpad'){
@@ -296,9 +319,18 @@ function handleAction(action){
     if(!game){ toast('⚠️ Jeu introuvable'); return; }
     state.launchpadOpen = false;
     if(game.mode === 'tablet'){
-      state.activeApp = 'customgame:' + id;
-      renderHUD();
-      toast('🖥️ ' + game.name + ' (tablette)');
+      toast('⏳ Chargement de ' + game.name + '...');
+      cgBuildRuntimeUrls(game).then(entryUrl => {
+        state.customGameRuntimeUrls = state.customGameRuntimeUrls || {};
+        state.customGameRuntimeUrls[id] = entryUrl;
+        state.activeApp = 'customgame:' + id;
+        state.cgStylusHeld = false;
+        renderHUD();
+        toast('🖥️ ' + game.name + ' (tablette)');
+      }).catch(err => {
+        console.error('[Library] Échec chargement du jeu (tablette) :', err);
+        toast('⚠️ Impossible de charger ce jeu : ' + (err && err.message ? err.message : String(err)));
+      });
     } else {
       openCustomGameFullscreen(game);
     }
@@ -307,6 +339,12 @@ function handleAction(action){
   if(action==='customgame:controls:toggle'){
     state.cgControlsOpen = state.cgControlsOpen === false ? true : false;
     renderHUD();
+    return;
+  }
+  if(action==='customgame:stylus:toggle'){
+    state.cgStylusHeld = !state.cgStylusHeld;
+    renderHUD();
+    toast(state.cgStylusHeld ? '🖊️ Stylet en main' : '🖊️ Stylet reposé');
     return;
   }
   if(action==='customgame:fullscreen:close'){
@@ -325,6 +363,9 @@ function handleAction(action){
     return;
   }
   if(action==='closeApp'){
+    if(typeof state.activeApp === 'string' && state.activeApp.indexOf('customgame:') === 0){
+      cgRevokeBlobUrls(state.activeApp.slice('customgame:'.length));
+    }
     state.activeApp = null;
     state.appMaximized = false;
     state.depthGrabOffset = 0;
@@ -332,6 +373,7 @@ function handleAction(action){
     state.dragGazeMode = false;
     state.dragGazeOffX = 0;
     state.dragGazeOffY = 0;
+    state.cgStylusHeld = false;
     const calibPanel = document.getElementById('calibPanel');
     if(calibPanel) calibPanel.classList.remove('open');
     renderHUD(); return;
@@ -755,6 +797,15 @@ function handleAction(action){
   if(action.startsWith('game:')){
     handleGameAction(action); return;
   }
+  if(action==='scene:toggleMain'){
+    const mainScenes = SCENES.filter(s=>s.main);
+    if(mainScenes.length === 2){
+      const curId = state.scene && state.scene.id;
+      const next = (curId === mainScenes[0].id) ? mainScenes[1] : mainScenes[0];
+      hideFlatScreen(); setScene(next); renderHUD();
+    }
+    return;
+  }
   if(action.startsWith('scene:')){
     const id = action.slice(6);
     const sc = state.userMedia.find(m=>m.id===id) || SCENES.find(s=>s.id===id);
@@ -915,6 +966,17 @@ function handleAction(action){
     try{ localStorage.setItem('calib:uiDepth', String(state.uiDepthExtra)); }catch(_){}
     renderHUD(); return;
   }
+  if(action.startsWith('multitaskDist:')){
+    const stepPct = parseInt(action.slice(14)) || 0;
+    const curPct = Math.round((state.multiTaskDistanceScale||1)*100);
+    const nextPct = Math.max(55, Math.min(145, curPct + stepPct));
+    state.multiTaskDistanceScale = nextPct/100;
+    const label = document.getElementById('mtDistVal');
+    if(label) label.textContent = nextPct + '%';
+    const rng = document.getElementById('mtRngDistance');
+    if(rng) rng.value = nextPct;
+    renderHUD(); return;
+  }
   if(action==='toggleGaze'){ state.gazeEnabled=!state.gazeEnabled; renderHUD(); return; }
   if(action==='toggleHide'){
     state.menuHidden = !state.menuHidden;
@@ -1022,7 +1084,7 @@ function handleAction(action){
     const handler = ()=>{
       document.removeEventListener('click', handler);
       const fi = document.getElementById('atvFileInput');
-      if(fi){ fi.setAttribute('data-key', key); fi.setAttribute('data-name', state.atvPendingName); fi.click(); }
+      if(fi){ fi.setAttribute('data-key', key); fi.setAttribute('data-name', state.atvPendingName); window.NativeMediaFolder ? NativeMediaFolder.openFor(fi) : fi.click(); }
     };
     document.addEventListener('click', handler);
     return;
@@ -1041,7 +1103,7 @@ function handleAction(action){
   if(action==='appletv:creator:type:movie'){ state.atvCreatorType='movie'; renderHUD(); return; }
   if(action==='appletv:creator:cover'){
     toast('📁 Touchez l\'écran pour choisir une image');
-    const handler=()=>{ document.removeEventListener('click',handler); const ci=document.getElementById('atvCoverInput'); if(ci) ci.click(); };
+    const handler=()=>{ document.removeEventListener('click',handler); const ci=document.getElementById('atvCoverInput'); if(ci){ window.NativeMediaFolder ? NativeMediaFolder.openFor(ci) : ci.click(); } };
     document.addEventListener('click', handler); return;
   }
   if(action==='appletv:creator:edit:name'){
@@ -1065,7 +1127,7 @@ function handleAction(action){
     const uc = state.atvUserContent.find(c=>c.id===ucId);
     if(!uc) return;
     toast(`📁 Touchez l'écran pour importer "${uc.name}"`);
-    const handler=()=>{ document.removeEventListener('click',handler); const fi=document.getElementById('atvUserContentFileInput'); if(fi){ fi.setAttribute('data-ucid',ucId); fi.click(); } };
+    const handler=()=>{ document.removeEventListener('click',handler); const fi=document.getElementById('atvUserContentFileInput'); if(fi){ fi.setAttribute('data-ucid',ucId); window.NativeMediaFolder ? NativeMediaFolder.openFor(fi) : fi.click(); } };
     document.addEventListener('click', handler); return;
   }
   /* Disney+ actions */
@@ -1098,7 +1160,7 @@ function handleAction(action){
     state.disneyImportItem = null;
     renderHUD();
     toast('📁 Touchez l\'écran pour importer '+state.disneyPendingName);
-    const handler=()=>{ document.removeEventListener('click',handler); const fi=document.getElementById('disneyFileInput'); if(fi){ fi.setAttribute('data-key',key); fi.setAttribute('data-name',state.disneyPendingName); fi.click(); } };
+    const handler=()=>{ document.removeEventListener('click',handler); const fi=document.getElementById('disneyFileInput'); if(fi){ fi.setAttribute('data-key',key); fi.setAttribute('data-name',state.disneyPendingName); window.NativeMediaFolder ? NativeMediaFolder.openFor(fi) : fi.click(); } };
     document.addEventListener('click', handler); return;
   }
   if(action==='disney:creator:menu'){
@@ -1112,7 +1174,7 @@ function handleAction(action){
   if(action==='disney:creator:type:movie'){ state.disneyCreatorType='movie'; renderHUD(); return; }
   if(action==='disney:creator:cover'){
     toast('📁 Touchez l\'écran pour choisir une image');
-    const handler=()=>{ document.removeEventListener('click',handler); const ci=document.getElementById('disneyCoverInput'); if(ci) ci.click(); };
+    const handler=()=>{ document.removeEventListener('click',handler); const ci=document.getElementById('disneyCoverInput'); if(ci){ window.NativeMediaFolder ? NativeMediaFolder.openFor(ci) : ci.click(); } };
     document.addEventListener('click', handler); return;
   }
   if(action==='disney:creator:edit:name'){
@@ -1136,7 +1198,7 @@ function handleAction(action){
     const uc = state.disneyUserContent.find(c=>c.id===ucId);
     if(!uc) return;
     toast(`📁 Touchez l'écran pour importer "${uc.name}"`);
-    const handler=()=>{ document.removeEventListener('click',handler); const fi=document.getElementById('disneyUserContentFileInput'); if(fi){ fi.setAttribute('data-ucid',ucId); fi.click(); } };
+    const handler=()=>{ document.removeEventListener('click',handler); const fi=document.getElementById('disneyUserContentFileInput'); if(fi){ fi.setAttribute('data-ucid',ucId); window.NativeMediaFolder ? NativeMediaFolder.openFor(fi) : fi.click(); } };
     document.addEventListener('click', handler); return;
   }
   if(action.startsWith('deleteMedia:')){
@@ -1151,7 +1213,20 @@ function handleAction(action){
     const handler = () => {
       state.waitingTouchForImport = false;
       document.removeEventListener('click', handler);
-      $('fileInput').click();
+      window.NativeMediaFolder ? NativeMediaFolder.openFor($('fileInput')) : $('fileInput').click();
+    };
+    document.addEventListener('click', handler);
+    return;
+  }
+  if(action==='cinemaroom:pick'){
+    if(state.waitingTouchForImport) return;
+    state.waitingTouchForImport = true;
+    state.importIntent = 'cinema';
+    toast('🎬 Touchez l\'écran pour choisir votre film ou série');
+    const handler = () => {
+      state.waitingTouchForImport = false;
+      document.removeEventListener('click', handler);
+      window.NativeMediaFolder ? NativeMediaFolder.openFor($('fileInput')) : $('fileInput').click();
     };
     document.addEventListener('click', handler);
     return;
@@ -1267,12 +1342,17 @@ $('fileInput').addEventListener('change', async (e)=>{
   }));
   // Sauvegarde chaque fichier (redimensionné pour les images) dans IndexedDB pour qu'il survive à la fermeture de l'app
   items.forEach((item, i) => { galSaveBlob(processedFiles[i], item.id); });
-  state.importPendingMedia = items[0];
   state.userMedia = [...items, ...state.userMedia];
   saveUserMedia();
+  e.target.value = '';
+  if(state.importIntent === 'cinema'){
+    state.importIntent = null;
+    startCinemaScreening(items[0]);
+    return;
+  }
+  state.importPendingMedia = items[0];
   state.panel = 'import-choice';
   renderHUD();
-  e.target.value = '';
 });
 
 /* Apple Music — lecture directe (play sans blob préchargé) */
@@ -1518,45 +1598,245 @@ function guessCustomGameMime(relPath){
 
 /* Construit l'URL virtuelle sous laquelle un fichier d'un jeu
    importé est stocké / servi : ./customgame-files/<id>/<chemin> */
-function customGameFileUrl(id, relPath){
-  return new URL('./customgame-files/' + id + '/' + relPath, location.href).toString();
-}
+/* ============================================================
+   Stockage des jeux custom importés — IndexedDB + Blob URLs.
 
-/* Écrit chaque fichier du dossier importé dans le cache dédié aux
-   jeux custom (voir sw.js → CUSTOM_GAMES_CACHE). C'est le Service
-   Worker qui, ensuite, répondra à ces URLs quand l'iframe du jeu
-   les demandera (script src, css, images, etc.) — exactement comme
-   un vrai petit serveur pour ce dossier. */
-async function saveCustomGameFiles(id, entries){
-  if(!('caches' in window)){
-    throw new Error('Le stockage hors-ligne (Cache Storage) n\'est pas disponible sur ce navigateur/contexte.');
-  }
-  const cache = await caches.open('horizon-customgames-v1');
-  for(const { relPath, file } of entries){
-    try{
-      const buf = await file.arrayBuffer();
-      const resp = new Response(buf, { headers: { 'Content-Type': guessCustomGameMime(relPath) } });
-      await cache.put(customGameFileUrl(id, relPath), resp);
-    }catch(err){
-      // On identifie le fichier fautif (utile pour un gros asset qui dépasse
-      // le quota de stockage du navigateur, ou un fichier corrompu du zip).
-      throw new Error('Fichier "' + relPath + '" : ' + (err && err.message ? err.message : String(err)));
+   AVANT : les fichiers étaient écrits dans le Cache Storage
+   (caches.put) et servis par le Service Worker sous une URL du
+   type "./customgame-files/<id>/...". Ça ne marche QUE si la page
+   est chargée en http/https : le Cache Storage refuse toute autre
+   URL (message "Request url is not HTTP/HTTPS"). Or dans la version
+   app (Capacitor), la page tourne sur "capacitor://localhost" sur
+   iOS (pas http/https) — d'où l'échec systématique. De plus, les
+   Service Workers ne fonctionnent quasiment pas dans la WKWebView
+   utilisée par Capacitor, donc toute cette approche est incompatible
+   avec l'app native, pas juste buguée dedans.
+
+   MAINTENANT : les fichiers sont stockés dans IndexedDB (aucune
+   contrainte de schéma d'URL — ça marche sous capacitor://, file://,
+   https://, etc.). Au lancement du jeu, on reconstruit tout en
+   mémoire avec des Blob URLs : le HTML d'entrée est réécrit (script
+   src, link href, img src, url() CSS...) pour pointer vers les
+   Blob URLs des autres fichiers, et un petit shim intercepte
+   fetch()/XMLHttpRequest pour les jeux qui chargent des assets de
+   façon relative en JS (fetch('data.json'), new Audio('son.mp3')...).
+   Ce système est identique en navigateur ET dans l'app.
+   ============================================================ */
+const CG_DB_NAME = 'horizon-customgames';
+const CG_DB_STORE = 'files';
+
+function cgOpenDB(){
+  return new Promise((resolve, reject) => {
+    if(!('indexedDB' in window)){
+      reject(new Error('IndexedDB indisponible sur ce navigateur/contexte.'));
+      return;
     }
+    const req = indexedDB.open(CG_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if(!db.objectStoreNames.contains(CG_DB_STORE)){
+        db.createObjectStore(CG_DB_STORE, { keyPath: 'key' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('Ouverture IndexedDB impossible'));
+  });
+}
+
+function cgListForId(db, id){
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CG_DB_STORE, 'readonly');
+    const store = tx.objectStore(CG_DB_STORE);
+    const results = [];
+    const req = store.openCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if(!cursor){ resolve(results); return; }
+      if(cursor.value.id === id) results.push(cursor.value);
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/* Écrit chaque fichier du dossier/zip importé dans IndexedDB. */
+async function saveCustomGameFiles(id, entries){
+  const db = await cgOpenDB();
+  try{
+    for(const { relPath, file } of entries){
+      try{
+        const buf = await file.arrayBuffer();
+        const blob = new Blob([buf], { type: guessCustomGameMime(relPath) });
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(CG_DB_STORE, 'readwrite');
+          tx.objectStore(CG_DB_STORE).put({ key: id + '|' + relPath, id, relPath, blob });
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+      }catch(err){
+        // On identifie le fichier fautif (utile pour un gros asset qui dépasse
+        // le quota de stockage du navigateur, ou un fichier corrompu du zip).
+        throw new Error('Fichier "' + relPath + '" : ' + (err && err.message ? err.message : String(err)));
+      }
+    }
+  } finally {
+    db.close();
   }
 }
 
-/* Supprime tous les fichiers d'un jeu du cache quand il est retiré
-   de la Library, pour ne pas accumuler des dossiers fantômes. */
+/* Supprime tous les fichiers d'un jeu d'IndexedDB quand il est
+   retiré de la Library, pour ne pas accumuler des dossiers fantômes. */
 async function deleteCustomGameFiles(id){
   try{
-    if(!('caches' in window)) return;
-    const cache = await caches.open('horizon-customgames-v1');
-    const prefix = customGameFileUrl(id, '');
-    const requests = await cache.keys();
-    await Promise.all(
-      requests.filter(req => req.url.startsWith(prefix)).map(req => cache.delete(req))
-    );
+    const db = await cgOpenDB();
+    const all = await cgListForId(db, id);
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(CG_DB_STORE, 'readwrite');
+      const store = tx.objectStore(CG_DB_STORE);
+      all.forEach(rec => store.delete(rec.key));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
   }catch(_){}
+  cgRevokeBlobUrls(id);
+}
+
+/* Registre des Blob URLs créées par jeu, pour pouvoir les libérer
+   (URL.revokeObjectURL) quand le jeu est fermé ou supprimé. */
+const cgBlobUrlsByGame = Object.create(null);
+function cgRevokeBlobUrls(id){
+  const urls = cgBlobUrlsByGame[id];
+  if(urls) urls.forEach(u => { try{ URL.revokeObjectURL(u); }catch(_){} });
+  delete cgBlobUrlsByGame[id];
+}
+
+function cgIsRewriteableRef(ref){
+  if(!ref) return false;
+  return !/^([a-z][a-z0-9+.-]*:)?\/\//i.test(ref)       // http(s)://, //cdn...
+      && !/^(data|blob|mailto|javascript|about):/i.test(ref)
+      && ref.charAt(0) !== '#';
+}
+/* Résout un chemin relatif (référencé depuis un fichier situé dans
+   baseDir) vers le chemin relatif "normalisé" utilisé comme clé
+   dans le manifeste — gère ./, ../ et les chemins absolus. */
+function cgResolveRelPath(baseDir, ref){
+  const clean = ref.split('#')[0].split('?')[0];
+  try{
+    const base = 'https://cg.local/' + (baseDir ? baseDir + '/' : '');
+    return decodeURIComponent(new URL(clean, base).pathname.replace(/^\//, ''));
+  }catch(_){ return null; }
+}
+function cgRewriteCssUrls(cssText, dir, manifest){
+  return cssText.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi, (m, q, ref) => {
+    if(!cgIsRewriteableRef(ref)) return m;
+    const resolved = cgResolveRelPath(dir, ref);
+    const mapped = resolved && manifest[resolved];
+    return mapped ? 'url(' + q + mapped + q + ')' : m;
+  });
+}
+
+/* Reconstruit un jeu importé entièrement en mémoire (Blob URLs) à
+   partir de ce qui est stocké dans IndexedDB, et renvoie l'URL à
+   charger dans l'iframe pour son fichier d'entrée. */
+async function cgBuildRuntimeUrls(game){
+  const id = game.id;
+  cgRevokeBlobUrls(id); // on repart propre à chaque lancement
+  const db = await cgOpenDB();
+  const records = await cgListForId(db, id);
+  db.close();
+  if(!records.length) throw new Error('Aucun fichier trouvé pour ce jeu (a-t-il été supprimé ?).');
+
+  const manifest = Object.create(null); // relPath -> Blob URL
+  const createdUrls = [];
+  const registerUrl = (url) => { createdUrls.push(url); return url; };
+
+  // 1) fichiers "binaires" (tout sauf .html/.css) : Blob URL direct
+  records.forEach(r => {
+    if(/\.(html?|css)$/i.test(r.relPath)) return;
+    manifest[r.relPath] = registerUrl(URL.createObjectURL(r.blob));
+  });
+
+  // 2) fichiers CSS : réécriture des url(...) puis Blob URL
+  for(const r of records){
+    if(!/\.css$/i.test(r.relPath)) continue;
+    const text = await r.blob.text();
+    const dir = r.relPath.includes('/') ? r.relPath.slice(0, r.relPath.lastIndexOf('/')) : '';
+    const rewritten = cgRewriteCssUrls(text, dir, manifest);
+    manifest[r.relPath] = registerUrl(URL.createObjectURL(new Blob([rewritten], { type: 'text/css' })));
+  }
+
+  // 3) fichiers HTML : réécriture des attributs src/href/style + shim runtime
+  const ATTR_TAGS = { script:'src', link:'href', img:'src', source:'src', video:'src', audio:'src', embed:'src', track:'src' };
+  for(const r of records){
+    if(!/\.html?$/i.test(r.relPath)) continue;
+    const text = await r.blob.text();
+    const dir = r.relPath.includes('/') ? r.relPath.slice(0, r.relPath.lastIndexOf('/')) : '';
+    let doc = null;
+    try{ doc = new DOMParser().parseFromString(text, 'text/html'); }catch(_){ doc = null; }
+
+    if(doc){
+      Object.keys(ATTR_TAGS).forEach(tag => {
+        const attr = ATTR_TAGS[tag];
+        doc.querySelectorAll(tag + '[' + attr + ']').forEach(el => {
+          const ref = el.getAttribute(attr);
+          if(!cgIsRewriteableRef(ref)) return;
+          const resolved = cgResolveRelPath(dir, ref);
+          if(resolved && manifest[resolved]) el.setAttribute(attr, manifest[resolved]);
+        });
+      });
+      doc.querySelectorAll('[style]').forEach(el => {
+        const css = el.getAttribute('style');
+        if(css && css.indexOf('url(') !== -1) el.setAttribute('style', cgRewriteCssUrls(css, dir, manifest));
+      });
+      doc.querySelectorAll('style').forEach(styleEl => {
+        styleEl.textContent = cgRewriteCssUrls(styleEl.textContent, dir, manifest);
+      });
+
+      // Shim : redirige les fetch()/XHR faits en relatif (assets chargés
+      // dynamiquement en JS) vers le bon Blob URL.
+      const shim = doc.createElement('script');
+      shim.textContent = '(function(){'
+        + 'var M=' + JSON.stringify(manifest) + ';'
+        + 'var BASE=' + JSON.stringify(dir) + ';'
+        + 'function resolve(u){try{'
+        + 'if(!u||typeof u!=="string")return null;'
+        + 'if(/^([a-z][a-z0-9+.\\-]*:)?\\/\\//i.test(u))return null;'
+        + 'if(/^(data|blob|mailto|javascript|about):/i.test(u))return null;'
+        + 'var base="https://cg.local/"+(BASE?BASE+"/":"");'
+        + 'var p=decodeURIComponent(new URL(u.split("#")[0],base).pathname.replace(/^\\//,""));'
+        + 'return M.hasOwnProperty(p)?M[p]:null;'
+        + '}catch(e){return null;}}'
+        + 'var _fetch=window.fetch;'
+        + 'if(_fetch){window.fetch=function(input,init){'
+        + 'var url=typeof input==="string"?input:(input&&input.url);'
+        + 'var m=url?resolve(url):null;'
+        + 'return _fetch(m||input,init);'
+        + '};}'
+        + 'var _open=XMLHttpRequest.prototype.open;'
+        + 'XMLHttpRequest.prototype.open=function(method,url){'
+        + 'var m=resolve(url);'
+        + 'var args=[].slice.call(arguments);'
+        + 'if(m)args[1]=m;'
+        + 'return _open.apply(this,args);'
+        + '};'
+        + '})();';
+      if(doc.head) doc.head.insertBefore(shim, doc.head.firstChild);
+      else doc.documentElement.insertBefore(shim, doc.documentElement.firstChild);
+
+      const finalHtml = '<!DOCTYPE html>' + doc.documentElement.outerHTML;
+      manifest[r.relPath] = registerUrl(URL.createObjectURL(new Blob([finalHtml], { type: 'text/html' })));
+    } else {
+      manifest[r.relPath] = registerUrl(URL.createObjectURL(new Blob([text], { type: 'text/html' })));
+    }
+  }
+
+  cgBlobUrlsByGame[id] = createdUrls;
+
+  const entryPath = game.entryFile || 'index.html';
+  const entryUrl = manifest[entryPath];
+  if(!entryUrl) throw new Error('Fichier d\'entrée "' + entryPath + '" introuvable parmi les fichiers enregistrés.');
+  return entryUrl;
 }
 
 /* ============================================================
@@ -1566,8 +1846,17 @@ async function deleteCustomGameFiles(id){
    peut alors gérer sa propre session WebXR (navigator.xr.requestSession)
    pour le rendu stéréo et le hand tracking natifs du casque.
    ============================================================ */
-function openCustomGameFullscreen(game){
+async function openCustomGameFullscreen(game){
   closeCustomGameFullscreen();
+  toast('⏳ Chargement du jeu...');
+  let entryUrl;
+  try{
+    entryUrl = await cgBuildRuntimeUrls(game);
+  }catch(err){
+    console.error('[Library] Échec chargement du jeu :', err);
+    toast('⚠️ Impossible de charger ce jeu : ' + (err && err.message ? err.message : String(err)));
+    return;
+  }
   state.customGameFullscreenId = game.id;
 
   const overlay = document.createElement('div');
@@ -1587,11 +1876,11 @@ function openCustomGameFullscreen(game){
   iframe.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;';
   iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-pointer-lock allow-popups');
   iframe.setAttribute('allow', 'xr-spatial-tracking; camera; microphone; autoplay; gamepad; fullscreen');
-  // Le dossier importé est servi par le Service Worker depuis le
-  // Cache Storage (voir saveCustomGameFiles / sw.js) : on charge donc
-  // une vraie URL et non plus un srcdoc, ce qui permet aux fichiers
-  // du jeu de se référencer entre eux normalement (script src, css, assets...).
-  iframe.src = customGameFileUrl(game.id, game.entryFile || 'index.html');
+  // Le dossier importé est reconstruit en mémoire via des Blob URLs
+  // (voir cgBuildRuntimeUrls) : on charge donc une vraie URL et non un
+  // srcdoc, ce qui permet aux fichiers du jeu de se référencer entre
+  // eux normalement (script src, css, assets...).
+  iframe.src = entryUrl;
 
   overlay.appendChild(iframe);
   overlay.appendChild(closeBtn);
@@ -1602,5 +1891,6 @@ function openCustomGameFullscreen(game){
 function closeCustomGameFullscreen(){
   const old = document.getElementById('__customGameFullscreenOverlay');
   if(old) old.remove();
+  if(state.customGameFullscreenId) cgRevokeBlobUrls(state.customGameFullscreenId);
   state.customGameFullscreenId = null;
 }

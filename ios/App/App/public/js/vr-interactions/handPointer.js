@@ -24,11 +24,23 @@
       }
       #horizon-nav-cursor.hn-tap{ transform:scale(.65); background:rgba(127,233,255,.55); }
       #horizon-nav-cursor.hn-scroll{ border-color:#9dff7f; box-shadow:0 0 14px rgba(157,255,127,.5); }
+      #horizon-nav-dwell-ring{
+        position:fixed; top:0; left:0; width:44px; height:44px;
+        margin:-22px 0 0 -22px; border-radius:50%; pointer-events:none;
+        z-index:99998; display:none;
+        background:conic-gradient(#7fe9ff calc(var(--p,0) * 360deg), rgba(127,233,255,.12) 0);
+        -webkit-mask:radial-gradient(closest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+                mask:radial-gradient(closest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+        opacity:.9;
+      }
     `;
     document.head.appendChild(style);
     const cursor = document.createElement('div');
     cursor.id = 'horizon-nav-cursor';
     document.body.appendChild(cursor);
+    const ring = document.createElement('div');
+    ring.id = 'horizon-nav-dwell-ring';
+    document.body.appendChild(ring);
   }
 
   // Reuses the scrollable-ancestor finder already defined in
@@ -70,6 +82,31 @@
     cursor.classList.add('hn-tap');
     setTimeout(() => cursor.classList.remove('hn-tap'), 130);
 
+    // Navigateur 3D world-locked (js/vr-interactions/webview-browser.js) :
+    // ce n'est pas un élément DOM, c'est un <a-plane> dans la scène 3D, donc
+    // elementFromPoint ne peut pas le voir (il ne verrait que le <canvas>
+    // WebGL de l'a-scene). On teste d'abord un raycast dédié ; si le rayon
+    // touche le plan, on route le tap vers la WKWebView cachée et on
+    // s'arrête là, sans toucher au reste du pipeline DOM ci-dessous.
+    if (typeof window.__webviewBrowserHitTest === 'function') {
+      const hit = window.__webviewBrowserHitTest(x, y);
+      if (hit) {
+        window.HorizonWebBrowser.tap(hit.uv);
+        return;
+      }
+    }
+
+    // IMPORTANT: read what's under the cursor BEFORE doing anything that
+    // can mutate the DOM. Opening an app/window calls renderHUD(), which
+    // rebuilds the HUD synchronously — so if we looked this up AFTER that
+    // call, elementFromPoint(x, y) could return a completely different
+    // element that just got rendered at that exact screen position (e.g.
+    // the newly-opened window's own close button), and we'd fire a
+    // second, unintended click on it in the very same tap — closing the
+    // app the instant it opened. Snapshotting first avoids that race.
+    const el = document.elementFromPoint(x, y);
+    const hitAppSystemTarget = !!(el && el.closest('[data-action]'));
+
     // 1) Horizon's custom app/window system (data-action targets, opened
     //    via hover) is already wired to the pinch gesture through this
     //    exact global hook — reuse it so a tap launches apps/windows
@@ -81,14 +118,22 @@
     // 2) Generic DOM fallback — plain buttons, links, media controls,
     //    file pickers, etc. Skipped for data-action targets since those
     //    were just handled by the app system above (avoids double-firing).
-    const el = document.elementFromPoint(x, y);
-    if (el && !el.closest('[data-action]')) {
+    if (el && !hitAppSystemTarget) {
       simulateClick(el, x, y);
     }
   }
 
   function handleScroll(deltaY, x, y, cursor) {
     cursor.classList.add('hn-scroll');
+
+    if (typeof window.__webviewBrowserHitTest === 'function') {
+      const hit = window.__webviewBrowserHitTest(x, y);
+      if (hit) {
+        window.HorizonWebBrowser.scroll(deltaY);
+        return;
+      }
+    }
+
     const el = document.elementFromPoint(x, y);
     const target = el ? findScrollTarget(el) : null;
     if (target) {
@@ -101,6 +146,7 @@
   function loop() {
     ensureCursor();
     const cursor = document.getElementById('horizon-nav-cursor');
+    const ring = document.getElementById('horizon-nav-dwell-ring');
     const nav = window.HorizonHandNav;
     if (!nav) {
       requestAnimationFrame(loop);
@@ -111,6 +157,7 @@
     if (!hs.visible || !hs.pointing) {
       cursor.style.display = 'none';
       cursor.classList.remove('hn-scroll');
+      if (ring) ring.style.display = 'none';
       requestAnimationFrame(loop);
       return;
     }
@@ -118,6 +165,17 @@
     cursor.style.display = 'block';
     cursor.style.left = hs.screenX + 'px';
     cursor.style.top = hs.screenY + 'px';
+
+    if (ring) {
+      if (hs.scrollDeltaY) {
+        ring.style.display = 'none'; // no dwell ring while actively scrolling
+      } else {
+        ring.style.display = 'block';
+        ring.style.left = hs.screenX + 'px';
+        ring.style.top = hs.screenY + 'px';
+        ring.style.setProperty('--p', hs.dwellProgress || 0);
+      }
+    }
 
     if (hs.tap) {
       handleTap(hs.screenX, hs.screenY, cursor);

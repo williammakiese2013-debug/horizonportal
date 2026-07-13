@@ -69,25 +69,29 @@
   let handScreen = null;     // {pageX, pageY} en coordonnées page
   let handVisible = false;
   let pinching = false;
-  let renderPrevPinching = false; // pinch au frame de rendu précédent (pour les fronts grab/scale/click)
+  let renderPrevOpenPalmArmed = false; // main-ouverte-armée au frame précédent (pour les fronts grab/zoom/scroll)
   let pinchArmed = true;     // anti-répétition (hystérésis)
   let handInteractionMode = 'far'; // 'far'=ray+pinch, 'close'=direct touch+poke
   let handSpread = 0;
 
-  /* --- NOUVEAUX GESTES ---------------------------------------------
-     - pointing   : index seul tendu (autres doigts repliés) → sélection
-       à distance (active le dwell-click, désactivé par défaut en mode
-       main pour laisser le pinch être le seul déclencheur instantané).
-     - openPalm   : main grande ouverte (4 doigts tendus) → tenue ~0.6s
-       déclenche un recentrage de l'interface (comme le bouton ⊙).
-     - swipe      : déplacement horizontal rapide de la paume → navigue
-       (onglets Écran d'accueil, galerie, etc.).
+  /* --- GESTES -------------------------------------------------------
+     - pointing   : index seul tendu (autres doigts repliés) → vise un
+       bouton ; le CLIC se fait en pointant puis en tenant ~0.5s dessus
+       (dwell), voir handTracking.js/handPointer.js. Geste simple et
+       fiable : plus besoin de "pousser" l'index, juste tendre le doigt.
+     - openPalm   : main grande ouverte (4 doigts nettement tendus,
+       marge large pour ne pas confondre avec un pointage qui se
+       détend) → tenue franche d'environ 0.2s AVANT d'armer le
+       déplacement (grab fenêtre / zoom / scroll), pour qu'un geste
+       fugace ou accidentel ne déclenche jamais rien tout seul.
      ------------------------------------------------------------------ */
   let pointing = false;
-  let openPalm = false;
-  let openPalmHoldStart = 0;      // horodatage du début de la tenue "main ouverte"
-  let openPalmTriggered = false;  // anti-répétition tant que la main reste ouverte
-  const OPEN_PALM_HOLD_MS = 600;  // durée de tenue avant déclenchement du recentrage
+  let openPalm = false;            // état "main ouverte" instantané (anti-tremblement seulement),
+                                    // exposé tel quel via l'API pour les jeux (Web Hero, etc.)
+  let openPalmArmStart = 0;        // horodatage du début de la tenue franche "main ouverte"
+  let openPalmArmed = false;       // vrai seulement après OPEN_PALM_ARM_MS de tenue continue -
+                                    // c'est CE booléen (pas openPalm) qui arme grab/zoom/scroll/profondeur
+  const OPEN_PALM_ARM_MS = 200;    // durée de tenue "expressive" avant d'armer le déplacement
   let palmX = null, palmY = null; // centre de paume (normalisé 0..1), pour le swipe
   const swipeHistory = [];        // [{x, t}] fenêtre glissante pour la détection de balayage
   const SWIPE_WINDOW_MS = 350;
@@ -134,17 +138,29 @@
   let pokeBaseline = undefined;     // ligne de base Z index-tip/wrist pour le geste de "poke"
 
   /* --- SUIVI DEUX MAINS -----------------------------------------------
-     NOTE : numHands est volontairement figé à 1 ci-dessous (optimisation
-     demandée : latence/FPS maximum sur mobile avec une seule main suivie).
-     Toute la plomberie "plusieurs mains" (dispHandsAll, pinchArmedAll...)
-     est conservée telle quelle pour ne rien casser côté Web Hero (pont
-     postMessage, voir getAllBridgeHands plus bas) : elle contiendra
-     simplement 0 ou 1 élément au lieu de 0/1/2. --- */
-  let rawHandsAll = [];              // [{ landmarks:[21 pts bruts], label:'Left'|'Right'|null }, ...] (0 ou 1 élément)
+     numHands:2 ci-dessous (comme dans taxi3d/hand.js et webhero/handTracking.js) :
+     les deux mains sont détectées et dessinées (gant translucide) en
+     permanence. Une seule main à la fois "pilote" l'interaction OS (curseur/
+     clic/scroll/grab) — voir le choix de activeHandIdx plus bas — exactement
+     comme sur un vrai casque VR à main tracking : les deux mains sont visibles
+     et réactives, mais une seule tient le rayon d'interaction à l'instant T
+     (priorité à la main qui pince/pointe déjà, pour ne jamais "sauter" de
+     main sans raison). Toute la plomberie "plusieurs mains" (dispHandsAll,
+     pinchArmedAll...) existait déjà pour ne rien casser côté Web Hero (pont
+     postMessage, voir getAllBridgeHands plus bas) — elle contient maintenant
+     réellement 0, 1 ou 2 éléments. --- */
+  let rawHandsAll = [];              // [{ landmarks:[21 pts bruts], label:'Left'|'Right'|null }, ...] (0 à 2 éléments)
   let dispHandsAll = [];             // même forme, landmarks lissés (One Euro) — un tableau par main détectée
   let pinchArmedAll = [];            // hystérésis pinch, une entrée par main (indexée comme dispHandsAll)
   let pinchingAll = [];              // état pinch courant, une entrée par main
   let activeHandIdx = 0;             // index (dans dispHandsAll) de la main qui pilote l'interaction
+
+  /* --- Icônes de poignet (façon Meta Quest) -------------------------------
+     ☰ suit le poignet de la main GAUCHE (ouvre/ferme le Launchpad), ∞ suit
+     le poignet de la main DROITE (raccourci Réglages). Un pincement de la
+     main correspondante déclenche l'action, une seule fois par pincement
+     (front montant) — même logique de hystérésis que le reste de l'OS. */
+  const wristPrevPinch = { Left:false, Right:false };
 
   /* --- FILTRE "ONE EURO" (Casiez et al.) ---------------------------------
      Lissage ADAPTATIF : plus de lissage quand la main est quasi immobile
@@ -272,7 +288,7 @@
     /* Sinon, ouvrir notre propre flux caméra arrière, caché */
     usingOwnVideo = true;
     const v = ensureOwnVideo();
-    ownStream = await navigator.mediaDevices.getUserMedia({
+    ownStream = await window.HorizonMedia.getCameraStream({
       video:{ facingMode:'environment', width:{ideal:640}, height:{ideal:480} }
     });
     v.srcObject = ownStream;
@@ -332,8 +348,11 @@
        1) import() dynamique du bundle ES @mediapipe/tasks-vision ;
        2) FilesetResolver.forVisionTasks() résout le runtime WASM ;
        3) HandLandmarker.createFromOptions() avec :
-          - numHands: 1            (optimisation demandée : 1 seule main
-                                     suivie = latence/FPS maximum)
+          - numHands: 2            (les deux mains, comme taxi3d/hand.js et
+                                     webhero/handTracking.js — nécessaire pour
+                                     que le gant translucide affiche bien les
+                                     DEUX mains à l'écran, pas seulement celle
+                                     qui pilote le curseur)
           - delegate: 'GPU'        (délégation GPU = FPS max sur mobile),
                                      avec repli automatique sur 'CPU' si
                                      le GPU n'est pas disponible/supporté
@@ -352,7 +371,7 @@
         delegate
       },
       runningMode: 'VIDEO',
-      numHands: 1,
+      numHands: 2,
       minHandDetectionConfidence: 0.5,
       minHandPresenceConfidence: 0.5,
       minTrackingConfidence: 0.5
@@ -394,6 +413,121 @@
     [0,17]                         // base de la paume
   ];
 
+  /* ---------------------------------------------------------------
+     RENDU "GANT" — mesh plein/translucide façon main VR (type
+     passthrough Quest), au lieu du squelette fil-de-fer vert d'origine.
+     Chaque doigt = une chaîne de capsules qui s'amincissent de la base
+     vers le bout ; la paume = un polygone arrondi. Tout est dessiné en
+     blanc/gris translucide avec un léger liseré clair, pour un rendu
+     "gant lumineux" proche d'une vraie main trackée en VR. */
+  const FINGER_CHAINS = {
+    thumb:  { idx:[1,2,3,4],   base:0.34, tip:0.19 },
+    index:  { idx:[5,6,7,8],   base:0.30, tip:0.14 },
+    middle: { idx:[9,10,11,12],base:0.31, tip:0.14 },
+    ring:   { idx:[13,14,15,16],base:0.28, tip:0.13 },
+    pinky:  { idx:[17,18,19,20],base:0.24, tip:0.12 }
+  };
+  const PALM_LOOP = [0,1,5,9,13,17]; // contour de paume (poignet + base des 5 doigts)
+
+  function lerp(a,b,t){ return a + (b-a)*t; }
+
+  /* Dessine une "capsule" (segment à largeur variable, bouts arrondis)
+     entre pA et pB, avec rayon rA/rB, remplie avec fillStyle et
+     liserée avec strokeStyle. */
+  function fillCapsule(ctx, pA, pB, rA, rB, fillStyle, strokeStyle){
+    const dx = pB.x - pA.x, dy = pB.y - pA.y;
+    const len = Math.hypot(dx, dy) || 0.0001;
+    const nx = -dy/len, ny = dx/len; // normale unitaire
+
+    ctx.beginPath();
+    ctx.moveTo(pA.x + nx*rA, pA.y + ny*rA);
+    ctx.lineTo(pB.x + nx*rB, pB.y + ny*rB);
+    ctx.arc(pB.x, pB.y, rB, Math.atan2(ny, nx), Math.atan2(-ny, -nx));
+    ctx.lineTo(pA.x - nx*rA, pA.y - ny*rA);
+    ctx.arc(pA.x, pA.y, rA, Math.atan2(-ny, -nx), Math.atan2(ny, nx));
+    ctx.closePath();
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
+    if(strokeStyle){
+      ctx.lineWidth = Math.max(1, rB*0.22);
+      ctx.strokeStyle = strokeStyle;
+      ctx.stroke();
+    }
+  }
+
+  /* Chaîne de capsules pour un doigt entier, largeur qui décroît
+     linéairement de `baseW` (base du doigt) à `tipW` (bout du doigt). */
+  function drawFingerChain(ctx, pts, idxChain, baseW, tipW, fillStyle, strokeStyle){
+    const n = idxChain.length - 1;
+    for(let i=0;i<n;i++){
+      const t0 = i/n, t1 = (i+1)/n;
+      const rA = lerp(baseW, tipW, t0)/2;
+      const rB = lerp(baseW, tipW, t1)/2;
+      fillCapsule(ctx, pts[idxChain[i]], pts[idxChain[i+1]], rA, rB, fillStyle, strokeStyle);
+    }
+  }
+
+  /* Paume : polygone arrondi passant par le poignet + la base des 5
+     doigts, rempli dans le même style que les doigts pour ne faire
+     "qu'une seule main" visuellement continue. */
+  function drawPalm(ctx, pts, radius, fillStyle, strokeStyle){
+    const loopPts = PALM_LOOP.map(i=>pts[i]);
+    ctx.beginPath();
+    for(let i=0;i<loopPts.length;i++){
+      const p = loopPts[i];
+      if(i===0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, radius*0.18);
+    ctx.strokeStyle = strokeStyle;
+    ctx.stroke();
+  }
+
+  /* Dessine une main complète (paume + 5 doigts + jointures) au style
+     "gant" translucide, pour les points déjà projetés à l'écran (pts). */
+  function drawGloveHand(ctx, pts, isActive){
+    // Taille de main = distance poignet -> base du majeur, sert à mettre
+    // à l'échelle l'épaisseur des doigts selon la distance à la caméra.
+    const handSize = Math.hypot(pts[9].x - pts[0].x, pts[9].y - pts[0].y) || 40;
+
+    const fill   = isActive ? 'rgba(235,238,244,0.55)' : 'rgba(200,210,225,0.40)';
+    const rim    = isActive ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.55)';
+
+    // 1) paume en premier (en dessous des doigts)
+    drawPalm(ctx, pts, handSize*0.5, fill, rim);
+
+    // 2) chaque doigt, du pouce à l'auriculaire
+    Object.keys(FINGER_CHAINS).forEach(name=>{
+      const f = FINGER_CHAINS[name];
+      drawFingerChain(ctx, pts, f.idx, handSize*f.base, handSize*f.tip, fill, rim);
+    });
+
+    // 3) petites rotules aux jointures pour arrondir les raccords entre
+    //    segments (évite l'effet "tuyaux visibles" aux articulations)
+    ctx.fillStyle = fill;
+    Object.keys(FINGER_CHAINS).forEach(name=>{
+      const f = FINGER_CHAINS[name];
+      f.idx.forEach((pi, i)=>{
+        const t = i/(f.idx.length-1);
+        const r = lerp(handSize*f.base, handSize*f.tip, t)/2;
+        ctx.beginPath();
+        ctx.arc(pts[pi].x, pts[pi].y, r, 0, Math.PI*2);
+        ctx.fill();
+      });
+    });
+
+    // 4) légère lueur sur les 5 bouts de doigts, comme un point de
+    //    contact "actif" — discret, purement esthétique
+    ctx.fillStyle = isActive ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.6)';
+    [4,8,12,16,20].forEach(tip=>{
+      ctx.beginPath();
+      ctx.arc(pts[tip].x, pts[tip].y, handSize*0.07, 0, Math.PI*2);
+      ctx.fill();
+    });
+  }
+
   /* Efface puis redessine le squelette (points + connexions), style
      "interface spatiale" : vert fluo, sans remplissage opaque qui
      boucherait la vue des apps derrière.
@@ -426,34 +560,24 @@
 
     if(!handsList || !handsList.length || !rects || !vw || !vh) return;
 
-    function drawForEye(rect, landmarks, color){
+    function drawForEye(rect, landmarks, isActive){
       if(!rect || !rect.width || !rect.height) return;
       const pts = landmarks.map(p=>{
         const m = mapToEye(p.x, p.y, vw, vh, rect.width, rect.height);
         return { x: rect.left + m.px, y: rect.top + m.py };
       });
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = color;
-      ctx.beginPath();
-      HAND_BONES.forEach(([a,b])=>{
-        ctx.moveTo(pts[a].x, pts[a].y);
-        ctx.lineTo(pts[b].x, pts[b].y);
-      });
-      ctx.stroke();
-      ctx.fillStyle = color;
-      pts.forEach(p=>{
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
-        ctx.fill();
-      });
+      drawGloveHand(ctx, pts, isActive);
     }
-    /* La main ACTIVE (celle qui pilote le curseur/pinch) est tracée en
-       vert vif ; toute autre main détectée en même temps (2e main, si un
-       jour numHands est remonté à 2) est tracée en cyan. */
+    /* La main ACTIVE (celle qui pilote le curseur/pinch) est dessinée
+       légèrement plus opaque/lumineuse ; l'autre main détectée en même
+       temps (numHands:2) est dessinée plus sombre/transparente pour
+       rester secondaire visuellement, tout en restant parfaitement
+       suivie (gant qui colle à la main, prête à devenir active dès
+       qu'elle pince/pointe). */
     handsList.forEach((h, i)=>{
-      const color = (i === activeHandIdx) ? '#00FF00' : '#37e0ff';
-      drawForEye(rects.L, h, color);
-      drawForEye(rects.R, h, color);
+      const isActive = (i === activeHandIdx);
+      drawForEye(rects.L, h, isActive);
+      drawForEye(rects.R, h, isActive);
     });
   }
 
@@ -467,47 +591,39 @@
   function dist3(a, b){
     return Math.hypot(a.x-b.x, a.y-b.y, (a.z||0)-(b.z||0));
   }
-  function isFingerExtended(landmarks, tipIdx, pipIdx, wrist){
-    return dist3(wrist, landmarks[tipIdx]) > dist3(wrist, landmarks[pipIdx]) * 1.15;
+  function isFingerExtended(landmarks, tipIdx, pipIdx, wrist, ratio){
+    return dist3(wrist, landmarks[tipIdx]) > dist3(wrist, landmarks[pipIdx]) * (ratio || 1.15);
   }
   function classifyGesture(landmarks){
     const wrist = landmarks[0];
-    const idxExt   = isFingerExtended(landmarks, 8,  6,  wrist);
-    const midExt   = isFingerExtended(landmarks, 12, 10, wrist);
-    const ringExt  = isFingerExtended(landmarks, 16, 14, wrist);
-    const pinkyExt = isFingerExtended(landmarks, 20, 18, wrist);
+    const idxExt   = isFingerExtended(landmarks, 8,  6,  wrist, 1.15);
+    const midExt   = isFingerExtended(landmarks, 12, 10, wrist, 1.15);
+    const ringExt  = isFingerExtended(landmarks, 16, 14, wrist, 1.15);
+    const pinkyExt = isFingerExtended(landmarks, 20, 18, wrist, 1.15);
     const extendedCount = [idxExt, midExt, ringExt, pinkyExt].filter(Boolean).length;
+    /* Main ouverte : marge plus large (1.35 au lieu de 1.15) sur CHACUN des
+       4 doigts, exprès plus stricte que le simple "extendedCount>=4" — un
+       geste franc et assumé, pas une main qui se détend en fin de pointage.
+       C'est ce qui rend le déplacement "expressif" et non déclenché à tout
+       va (voir aussi la tenue OPEN_PALM_ARM_MS appliquée par-dessus). */
+    const idxExtWide   = isFingerExtended(landmarks, 8,  6,  wrist, 1.35);
+    const midExtWide   = isFingerExtended(landmarks, 12, 10, wrist, 1.35);
+    const ringExtWide  = isFingerExtended(landmarks, 16, 14, wrist, 1.35);
+    const pinkyExtWide = isFingerExtended(landmarks, 20, 18, wrist, 1.35);
     return {
       pointing: idxExt && !midExt && !ringExt && !pinkyExt,
-      openPalm: extendedCount >= 4,
+      openPalm: idxExtWide && midExtWide && ringExtWide && pinkyExtWide,
       peaceSign: idxExt && midExt && !ringExt && !pinkyExt,
       extendedCount
     };
   }
 
-  /* Main grande ouverte tenue ~600ms → recentre l'interface (même action
-     que le bouton ⊙ Recentrer), sans compte à rebours visuel puisque la
-     tenue du geste EST le délai. */
-  function updateOpenPalmRecenter(isOpen){
-    const now = performance.now();
-    if(!isOpen){
-      openPalmHoldStart = 0; openPalmTriggered = false; return;
-    }
-    if(!openPalmHoldStart) openPalmHoldStart = now;
-    if(openPalmTriggered) return;
-    if(now - openPalmHoldStart >= OPEN_PALM_HOLD_MS){
-      openPalmTriggered = true;
-      if(camL && camL.object3D){
-        state.initYaw = camL.object3D.rotation.y;
-        state.initPitch = camL.object3D.rotation.x;
-        positionFlatScreen();
-        _prevLocked = null; // force re-freeze
-        if(state.locked) setTimeout(freezeHUDNow, 30);
-      }
-      playAppleClick();
-      toast('🖐️ Interface recentrée');
-    }
-  }
+  /* Note: la main ouverte tenue déclenchait auparavant un recentrage
+     d'interface (fonction supprimée). Le geste "main ouverte" est
+     désormais réservé au déplacement/zoom/scroll des fenêtres (voir
+     openPalmArmed plus bas) pour rester simple et sans ambiguïté — un
+     seul geste, un seul sens. Le recentrage reste disponible via le
+     bouton ⊙ dédié.
 
   /* Signe V (paix) tenu ~600ms → bascule le passthrough caméra, sans
      compte à rebours visuel (la tenue du geste EST le délai), sur le
@@ -545,7 +661,6 @@
     if(Math.abs(dx) >= SWIPE_MIN_DIST){
       const dir = dx > 0 ? 'right' : 'left';
       swipeCooldownUntil = now + 700;
-      openPalmHoldStart = now; // évite un recentrage accidentel juste après le balayage
       swipeHistory.length = 0;
       triggerGestureSwipe(dir);
     }
@@ -604,9 +719,6 @@
     renderHUD();
     playAppleClick();
     toast('🖐️ Menu éloigné');
-    /* Repousse le déclenchement du recentrage par main-ouverte-tenue,
-       pour ne pas enchaîner accidentellement sur ce geste. */
-    openPalmHoldStart = performance.now();
   }
 
   /* ---------------------------------------------------------------
@@ -669,6 +781,77 @@
     const cx = (vx - sx) / sw;
     const cy = (vy - sy) / sh;
     return { px: cx*eyeW, py: cy*eyeH };
+  }
+
+  /* ---------------------------------------------------------------
+     Icônes de poignet ☰ / ∞ — voir wristPrevPinch plus haut. Repose
+     entièrement sur rawHandsAll[].label ('Left'/'Right', fourni par
+     MediaPipe) + dispHandsAll[][0] (landmark du poignet) déjà maintenus
+     par la boucle principale de renderLoop ; aucun état de détection
+     supplémentaire n'est nécessaire ici. --------------------------- */
+  function updateWristIcons(rects){
+    const menuL = document.getElementById('wristMenuL');
+    const menuR = document.getElementById('wristMenuR');
+    const quickL = document.getElementById('wristQuickL');
+    const quickR = document.getElementById('wristQuickR');
+    if(!rects || !rawVW || !rawVH){
+      [menuL, menuR, quickL, quickR].forEach(function(el){ if(el) el.classList.remove('visible','wrist-icon-armed'); });
+      wristPrevPinch.Left = false; wristPrevPinch.Right = false;
+      return;
+    }
+    let leftIdx = -1, rightIdx = -1;
+    for(let hi=0; hi<rawHandsAll.length; hi++){
+      const lbl = rawHandsAll[hi] && rawHandsAll[hi].label;
+      if(lbl === 'Left' && leftIdx === -1) leftIdx = hi;
+      else if(lbl === 'Right' && rightIdx === -1) rightIdx = hi;
+    }
+    /* Chaque icône a une paire stéréo (comme cursorL/cursorR) : la main
+       GAUCHE pilote ☰ (menuL dans l'oeil gauche, menuR dans l'oeil droit),
+       la main DROITE pilote ∞ (quickL/quickR). */
+    positionWristIcon(menuL, menuR, leftIdx, rects, 'Left', -0.045);
+    positionWristIcon(quickL, quickR, rightIdx, rects, 'Right', 0.045);
+  }
+
+  function positionWristIcon(elL, elR, handIdx, rects, label, offsetX){
+    if(handIdx === -1 || !dispHandsAll[handIdx]){
+      if(elL) elL.classList.remove('visible','wrist-icon-armed');
+      if(elR) elR.classList.remove('visible','wrist-icon-armed');
+      wristPrevPinch[label] = false;
+      return;
+    }
+    const wrist = dispHandsAll[handIdx][0];
+    /* Décalage vers l'extérieur/au-dessus du poignet — l'icône flotte à
+       côté de la main levée, comme dans la vidéo de référence. */
+    const nx = Math.min(1, Math.max(0, wrist.x + offsetX));
+    const ny = Math.max(0, wrist.y - 0.06);
+    const isPinching = !!pinchingAll[handIdx];
+    if(elL && rects.L && rects.L.width && rects.L.height){
+      const posL = mapToEye(nx, ny, rawVW, rawVH, rects.L.width, rects.L.height);
+      elL.style.left = posL.px + 'px'; elL.style.top = posL.py + 'px';
+      elL.classList.add('visible');
+      elL.classList.toggle('wrist-icon-armed', isPinching);
+    }
+    if(elR && rects.R && rects.R.width && rects.R.height){
+      const posR = mapToEye(nx, ny, rawVW, rawVH, rects.R.width, rects.R.height);
+      elR.style.left = posR.px + 'px'; elR.style.top = posR.py + 'px';
+      elR.classList.add('visible');
+      elR.classList.toggle('wrist-icon-armed', isPinching);
+    }
+    if(isPinching && !wristPrevPinch[label]) triggerWristAction(label);
+    wristPrevPinch[label] = isPinching;
+  }
+
+  function triggerWristAction(label){
+    if(label === 'Left'){
+      /* ☰ poignet gauche : ouvre/ferme le Launchpad (menu universel,
+         équivalent du bouton Meta sur une manette Quest). */
+      handleAction(state.launchpadOpen ? 'closeLaunchpad' : 'openLaunchpad');
+    } else {
+      /* ∞ poignet droit : raccourci Réglages rapides. */
+      handleAction('app:settings');
+    }
+    if(typeof playAppleClick === 'function') playAppleClick();
+    if(typeof renderHUD === 'function') renderHUD();
   }
 
   function updateCursorDOM(el, px, py, isActive, isPinching, isPointing){
@@ -877,12 +1060,14 @@
       updateHandRay(null);
       pinching = false; pinchArmed = true;
       pointing = false; openPalm = false; peaceSign = false;
-      renderPrevPinching = false;
+      openPalmArmStart = 0; openPalmArmed = false;
+      renderPrevOpenPalmArmed = false;
       updateCursorDOM(cursorL, 0, 0, false, false);
       updateCursorDOM(cursorR, 0, 0, false, false);
       update3DCursor('handCursorL', 0, 0, 1, 1, null, false);
       update3DCursor('handCursorR', 0, 0, 1, 1, null, false);
       drawHandSkeleton(null, null, 0, 0);
+      updateWristIcons(null);
       return;
     }
 
@@ -948,6 +1133,7 @@
 
     const rects = getEyeRects();
     if(rects) drawHandSkeleton(dispHandsAll, rects, rawVW, rawVH);
+    updateWristIcons(rects);
 
     const wrist = dispLandmarks[0];
     const indexTip = dispLandmarks[8];
@@ -962,13 +1148,15 @@
       if(handInteractionMode === 'close' && handSpread < 0.22) handInteractionMode = 'far';
     } else { handInteractionMode = window.__forceHandMode; }
 
-    /* --- CLIC : geste "index qui avance et se plie légèrement" (comme
-       appuyer un bouton virtuel dans le vide), MÊME geste qu'on soit loin
-       ou proche de la cible. pokeZ suit la profondeur relative (z) du
+    /* --- Geste de "poke" (index qui avance puis se replie) : conservé
+       tel quel, INCHANGÉ, uniquement pour les mini-jeux (boxe, cuisine,
+       tennis, Web Hero...) qui l'utilisent comme jab/poke/tir. Ce n'est
+       PLUS ce geste qui pilote le clic de l'interface Horizon (voir plus
+       bas : le clic OS passe maintenant par le pointage + tenue/dwell,
+       beaucoup plus simple et fiable qu'une poussée en profondeur estimée
+       depuis une seule caméra). pokeZ suit la profondeur relative (z) du
        bout de l'index par rapport au poignet ; pokeBaseline s'adapte
-       lentement à la pose courante de la main tant qu'on ne clique pas
-       (dérive naturelle), pour ne réagir qu'à un mouvement volontaire et
-       assez rapide de l'index vers l'avant + repli. --- */
+       lentement à la pose courante de la main tant qu'on ne "poke" pas. --- */
     const pokeZ = indexTip.z - wrist.z;
     if(pokeBaseline === undefined) pokeBaseline = pokeZ;
     if(!pinching){
@@ -977,9 +1165,38 @@
     const pokeDelta = pokeZ - pokeBaseline;
     if(pinchArmed && pokeDelta > 0.07){ pinching = true; pinchArmed = false; }
     else if(!pinchArmed && pokeDelta < 0.02){ pinching = false; pinchArmed = true; }
-    pointing = pokeDelta > 0.03;
-    openPalm  = false;
-    peaceSign = false;
+    /* `pinching` (ci-dessus, geste de "poke") reste inchangé et continue de
+       piloter les mini-jeux (boxe, cuisine, tennis, Web Hero...) exactement
+       comme avant — aucune régression là-dessus.
+
+       En revanche, pour l'OS lui-même (clic sur les boutons, déplacement/
+       zoom/scroll des fenêtres), on utilise maintenant une vraie
+       classification de la forme de la main plutôt qu'une poussée en Z :
+       - pointing  : juste l'index tendu, cf. classifyGesture(). Sert au
+         clic par visée + tenue (dwell), voir handTracking.js/handPointer.js.
+       - openPalm  : main grande ouverte, confirmée sur quelques frames pour
+         ignorer le tremblement (exposée telle quelle via l'API pour les
+         jeux). Le déplacement de fenêtre, lui, attend en plus une tenue
+         franche de OPEN_PALM_ARM_MS (voir openPalmArmed) avant de s'armer,
+         pour qu'un geste bref ou accidentel ne déclenche jamais un grab. */
+    const g = classifyGesture(dispLandmarks);
+    pointing  = confirmPointing  ? confirmPointing(g.pointing)   : g.pointing;
+    openPalm  = confirmOpenPalm  ? confirmOpenPalm(g.openPalm)   : g.openPalm;
+    peaceSign = confirmPeaceSign ? confirmPeaceSign(g.peaceSign) : g.peaceSign;
+
+    if(openPalm){
+      if(!openPalmArmStart) openPalmArmStart = now;
+      openPalmArmed = (now - openPalmArmStart) >= OPEN_PALM_ARM_MS;
+    } else {
+      openPalmArmStart = 0;
+      openPalmArmed = false;
+    }
+
+    /* Signe V / paix tenu ~0.6s → bascule le passthrough caméra (nouveau
+       geste, sans risque : forme de main très distincte du pointage (1
+       doigt) et de la main ouverte (4 doigts), donc jamais déclenché par
+       erreur pendant un clic ou un déplacement de fenêtre). */
+    updatePeaceSignPassthrough(peaceSign);
 
     const palmPts = [dispLandmarks[0], dispLandmarks[5], dispLandmarks[9], dispLandmarks[13], dispLandmarks[17]];
     palmX = palmPts.reduce((s,p)=>s+p.x,0) / palmPts.length;
@@ -992,37 +1209,29 @@
     handScreen = { pageX: rects.L.left + posL.px, pageY: rects.L.top + posL.py };
     updateHandRay(handScreen);
 
-    updateCursorDOM(cursorL, posL.px, posL.py, true, pinching, pointing);
-    updateCursorDOM(cursorR, posR.px, posR.py, true, pinching, pointing);
+    updateCursorDOM(cursorL, posL.px, posL.py, true, openPalmArmed, pointing);
+    updateCursorDOM(cursorR, posR.px, posR.py, true, openPalmArmed, pointing);
 
     if(camL && camL.object3D) update3DCursor('handCursorL', posL.px, posL.py, rects.L.width, rects.L.height, camL.object3D, true);
     if(camR && camR.object3D) update3DCursor('handCursorR', posR.px, posR.py, rects.R.width, rects.R.height, camR.object3D, true);
 
-    /* --- ZOOM / GRAB & MOVE : priorité au zoom si le pinch démarre sur
-       une poignée de coin (.app-win-pinchzoom) ; sinon priorité au grab
-       de fenêtre si le pinch démarre sur la poignée de drag ; sinon,
-       comportement inchangé (clic instantané sur la cible sous le
-       curseur, ex: boutons/dwell). Les deux gestes s'excluent
-       mutuellement : tant que handScale.active est vrai, updateHandGrab
-       n'est jamais appelée, et vice versa. Les fronts pinching/wasPinching
-       sont évalués ICI (cadence d'affichage) pour un geste de
-       glisser-déposer parfaitement fluide. --- */
-    const wasPinching = renderPrevPinching;
-    const grabbedBefore = handGrab.active;
+    /* --- ZOOM / GRAB & MOVE : déclenchés par la main OUVERTE tenue
+       franchement (openPalmArmed), plus par le poke — "pour déplacer,
+       il faut ouvrir la main". Priorité au zoom si la main s'ouvre sur une
+       poignée de coin (.app-win-pinchzoom) ; sinon priorité au grab de
+       fenêtre si elle s'ouvre sur la poignée de drag ; sinon zone
+       scrollable sous la main. Les gestes s'excluent mutuellement : tant
+       que handScale.active est vrai, updateHandGrab n'est jamais appelée,
+       et vice versa. Le CLIC, lui, ne passe plus par ici du tout : il est
+       géré séparément par le pointage + tenue (dwell), voir
+       handTracking.js / handPointer.js — plus simple et plus fiable. --- */
+    const wasOpenPalmArmed = renderPrevOpenPalmArmed;
     const scaledBefore = handScale.active;
-    const scrolledBefore = handScroll.active;
-    const depthBefore = handDepth.active;
-    updateHandScale(pinching, wasPinching, handScreen);
+    updateHandScale(openPalmArmed, wasOpenPalmArmed, handScreen);
     if(!handScale.active && !scaledBefore){
-      updateHandGrab(pinching, wasPinching, handScreen);
+      updateHandGrab(openPalmArmed, wasOpenPalmArmed, handScreen);
     }
-    if(pinching && !wasPinching && !handGrab.active && !grabbedBefore &&
-       !handScale.active && !scaledBefore && !handScroll.active && !scrolledBefore &&
-       !handDepth.active && !depthBefore &&
-       window.__handTrackPinchClick){
-      window.__handTrackPinchClick();
-    }
-    renderPrevPinching = pinching;
+    renderPrevOpenPalmArmed = openPalmArmed;
   }
 
   async function enableHandTrack(){
@@ -1047,9 +1256,7 @@
       rawLandmarks = null; dispLandmarks = null; pokeBaseline = undefined;
       rawHandsAll = []; dispHandsAll = []; pinchArmedAll = []; pinchingAll = []; filtersAll = []; activeHandIdx = 0;
       pointing = false; openPalm = false; peaceSign = false;
-      /* Confirmateurs anti-mélange repartis sur un état propre à chaque
-         activation, pour ne jamais hériter d'un tremblement de la session
-         précédente. */
+      openPalmArmStart = 0; openPalmArmed = false; renderPrevOpenPalmArmed = false;
       confirmPointing   = makeConfirmer(3);
       confirmOpenPalm   = makeConfirmer(3);
       confirmPeaceSign  = makeConfirmer(3);
@@ -1091,8 +1298,9 @@
     cancelHandDepthIfActive();
     cancelHandScrollIfActive();
     cancelHandScaleIfActive();
-    handVisible = false; pinching = false; pinchArmed = true; renderPrevPinching = false;
+    handVisible = false; pinching = false; pinchArmed = true; renderPrevOpenPalmArmed = false;
     pointing = false; openPalm = false; peaceSign = false;
+    openPalmArmStart = 0; openPalmArmed = false;
     rawLandmarks = null; dispLandmarks = null; handScreen = null;
     rawHandsAll = []; dispHandsAll = []; pinchArmedAll = []; pinchingAll = []; filtersAll = []; activeHandIdx = 0;
     updateHandRay(null);
@@ -1121,6 +1329,7 @@
      ci-dessous) tombe pile à la même hauteur/distance apparente que la
      main vue à travers la caméra du portail, sans distorsion d'aspect. */
   function getBridgeLandmarks(){
+    // Squelette de la main ACTIVE uniquement (celle qui pilote l'interaction).
     if(!dispLandmarks || !rawVW || !rawVH) return null;
     const w = window.innerWidth, h = window.innerHeight;
     if(!w || !h) return null;
@@ -1130,8 +1339,8 @@
     });
   }
 
-  /* Comme getBridgeLandmarks() mais pour TOUTES les mains détectées (0 ou 1
-     avec numHands:1), même reprojection "cover" par point. Permet à Web
+  /* Comme getBridgeLandmarks() mais pour TOUTES les mains détectées (0 à 2
+     avec numHands:2), même reprojection "cover" par point. Permet à Web
      Hero de dessiner un squelette pour chaque main levée — voir
      handTracking.js côté Web Hero. */
   function getAllBridgeHands(){
@@ -1155,6 +1364,7 @@
     get pinching(){ return pinching; },
     get pointing(){ return pointing; },
     get openPalm(){ return openPalm; },
+    get peaceSign(){ return peaceSign; },
     get mode(){ return handInteractionMode; },
     get handSpread(){ return handSpread; },
     /* Squelette complet (21 points, {x,y,z} normalisés 0..1, repère plein
@@ -1162,7 +1372,7 @@
        Web Hero pour reconstruire un squelette précis (chaque doigt + chaque
        pliure), et non plus un simple point de curseur. */
     get landmarks(){ return getBridgeLandmarks(); },
-    /* Nombre de mains actuellement détectées (0 ou 1, voir numHands:1
+    /* Nombre de mains actuellement détectées (0 à 2, voir numHands:2
        ci-dessus) + squelette de CHACUNE (voir getAllBridgeHands ci-dessus). */
     get handCount(){ return dispHandsAll.length; },
     get allHands(){ return getAllBridgeHands(); },

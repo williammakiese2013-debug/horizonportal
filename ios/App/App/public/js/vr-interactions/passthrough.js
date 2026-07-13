@@ -56,7 +56,7 @@
 
   async function enablePassthrough(){
     try{
-      stream = await navigator.mediaDevices.getUserMedia({
+      stream = await window.HorizonMedia.getCameraStream({
         video:{ facingMode:'environment', width:{ideal:1920}, height:{ideal:1080} }
       });
       vid.srcObject = stream;

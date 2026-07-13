@@ -18,6 +18,114 @@ function _getAmAudio(){
   return _amAudio;
 }
 
+/* ============================================================
+   FOND "TABLETTE POSÉE SUR UN BUREAU" — mode tablette
+   ============================================================
+   Pas de photo à disposition ici : on dessine donc à la volée (canvas 2D)
+   une pièce simple et stylisée — mur, sol, bureau en bois au premier plan
+   — projetée en équirectangulaire, et on la pose comme fond (a-sky) UNIQUEMENT
+   pendant qu'un jeu custom en mode tablette est ouvert. Le fond normal
+   (photo de paysage) est restauré automatiquement à la fermeture.
+   ============================================================ */
+let _tabletRoomDataUrl = null;
+let _tabletRoomActive = false;
+
+function _buildTabletRoomSkyDataUrl(){
+  if(_tabletRoomDataUrl) return _tabletRoomDataUrl;
+  const W = 2048, H = 1024;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+
+  // Mur (haut de l'image = ce qu'on voit en regardant devant/au-dessus)
+  const wallGrad = ctx.createLinearGradient(0, 0, 0, H*0.62);
+  wallGrad.addColorStop(0, '#2b3140');
+  wallGrad.addColorStop(1, '#3a4356');
+  ctx.fillStyle = wallGrad;
+  ctx.fillRect(0, 0, W, H*0.62);
+
+  // Fenêtre douce sur le mur (lumière ambiante d'une chambre le soir)
+  for(let i=0;i<2;i++){
+    const wx = W*0.28 + i*W*0.44;
+    const wg = ctx.createLinearGradient(0, H*0.14, 0, H*0.5);
+    wg.addColorStop(0, 'rgba(120,150,190,0.55)');
+    wg.addColorStop(1, 'rgba(70,90,120,0.25)');
+    ctx.fillStyle = wg;
+    ctx.fillRect(wx, H*0.14, W*0.1, H*0.36);
+    ctx.strokeStyle = 'rgba(20,22,28,0.6)';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(wx, H*0.14, W*0.1, H*0.36);
+  }
+
+  // Sol
+  const floorGrad = ctx.createLinearGradient(0, H*0.62, 0, H);
+  floorGrad.addColorStop(0, '#4a3a2c');
+  floorGrad.addColorStop(1, '#2a2119');
+  ctx.fillStyle = floorGrad;
+  ctx.fillRect(0, H*0.62, W, H*0.38);
+
+  // Bureau en bois (premier plan, juste devant/en dessous — là où la
+  // "tablette" de la fenêtre de jeu vient visuellement se poser)
+  const deskY = H*0.66;
+  const deskGrad = ctx.createLinearGradient(0, deskY, 0, deskY + H*0.16);
+  deskGrad.addColorStop(0, '#8a5a34');
+  deskGrad.addColorStop(1, '#5c3a20');
+  ctx.fillStyle = deskGrad;
+  ctx.fillRect(W*0.18, deskY, W*0.64, H*0.16);
+  // pieds du bureau
+  ctx.fillStyle = '#3a2414';
+  ctx.fillRect(W*0.2, deskY + H*0.16, W*0.03, H*0.16);
+  ctx.fillRect(W*0.76, deskY + H*0.16, W*0.03, H*0.16);
+  // liseré clair sur le bord du bureau (effet chanfrein)
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(W*0.18, deskY, W*0.64, H*0.012);
+
+  // Petit clavier posé sur le bureau (silhouette simple, décorative —
+  // les vraies touches interactives restent celles de l'interface, par
+  // dessus, en 2D)
+  const kbX = W*0.30, kbY = deskY + H*0.02, kbW = W*0.24, kbH = H*0.05;
+  ctx.fillStyle = '#1c1e22';
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(kbX, kbY, kbW, kbH, 10) : ctx.rect(kbX, kbY, kbW, kbH);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  const cols = 10, rows = 3;
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      ctx.fillRect(
+        kbX + kbW*0.05 + c*(kbW*0.09), kbY + kbH*0.15 + r*(kbH*0.28),
+        kbW*0.07, kbH*0.18
+      );
+    }
+  }
+
+  // Vignettage doux pour un rendu plus "pièce" que "texture plate"
+  const vg = ctx.createRadialGradient(W/2, H*0.5, H*0.2, W/2, H*0.5, W*0.6);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.35)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+
+  _tabletRoomDataUrl = cv.toDataURL('image/jpeg', 0.85);
+  return _tabletRoomDataUrl;
+}
+
+function setTabletRoomSky(active){
+  if(active === _tabletRoomActive) return;
+  _tabletRoomActive = active;
+  const skyL = document.getElementById('skyL');
+  const skyR = document.getElementById('skyR');
+  if(!skyL || !skyR) return;
+  if(active){
+    const url = _buildTabletRoomSkyDataUrl();
+    skyL.setAttribute('src', url);
+    skyR.setAttribute('src', url);
+  } else {
+    skyL.setAttribute('src', '#sky-img');
+    skyR.setAttribute('src', '#sky-img');
+  }
+}
+
 function amSaveLibrary(){
   try{
     const safe = state.amTracks.map(t=>({...t, audioUrl:''})); // don't store blobs in LS
@@ -133,7 +241,7 @@ function handleAppleMusicAction(action){
       const handler = e=>{
         document.removeEventListener('click', handler);
         const pi = document.getElementById('amPlayFileInput');
-        if(pi){ pi.setAttribute('data-trackid', id); pi.click(); }
+        if(pi){ pi.setAttribute('data-trackid', id); window.NativeMediaFolder ? NativeMediaFolder.openFor(pi) : pi.click(); }
       };
       document.addEventListener('click', handler);
     } else {
@@ -187,7 +295,7 @@ function handleAppleMusicAction(action){
     const handler=()=>{
       document.removeEventListener('click', handler);
       const ci = document.getElementById('amCoverFileInput');
-      if(ci) ci.click();
+      if(ci){ window.NativeMediaFolder ? NativeMediaFolder.openFor(ci) : ci.click(); }
     };
     document.addEventListener('click', handler);
     return;
@@ -197,7 +305,7 @@ function handleAppleMusicAction(action){
     const handler=()=>{
       document.removeEventListener('click', handler);
       const mi = document.getElementById('amMp3FileInput');
-      if(mi) mi.click();
+      if(mi){ window.NativeMediaFolder ? NativeMediaFolder.openFor(mi) : mi.click(); }
     };
     document.addEventListener('click', handler);
     return;
@@ -336,21 +444,26 @@ function renderHUD(){
   // Apply drag offset to appWindowTransform
   const dragOffX = state.dragGazeOffX || 0;
   const dragOffY = state.dragGazeOffY || 0;
+  // Jeu custom en mode "tablette" : on considère ça comme une expérience
+  // immersive (comme le mode cinéma) → on masque tout l'arrière-plan
+  // (HUD, rail, dock du bas) et on ne garde que le fond (sky, "bureau")
+  // + la fenêtre du jeu, posée plus bas et légèrement inclinée comme une
+  // vraie tablette qu'on regarde de haut, posée devant soi.
+  const isTabletCustomGame = !!(state.activeApp && state.activeApp.startsWith('customgame:') &&
+    (state.customGames||[]).find(g => ('customgame:'+g.id) === state.activeApp)?.mode === 'tablet');
+  setTabletRoomSky(isTabletCustomGame);
+
   // Sims 3 : écran géant immersif plein-champ (1280x720 → scale 1.55 @ Z -120px couvre les yeux)
   const appWindowTransform = (state.activeApp === 'sims3' && sims3State.open)
     ? uiDepthTransform(420, 0.66, 'translate(-50%,-50%)')
+    : isTabletCustomGame
+      ? uiDepthTransform(420, 0.8, `translate(-50%,-50%) translateY(${150+dragOffY}px) translateX(${dragOffX}px) rotateX(10deg)`)
     : state.appMaximized
       ? uiDepthTransform(420, 0.84, `translate(-50%,-50%) translateX(${dragOffX}px) translateY(${dragOffY}px)`)
       : uiDepthTransform(420, 0.78, `translate(-50%,-50%) translateX(${-640+dragOffX}px) translateY(${dragOffY}px)`);
   const launchpadTransform = uiDepthTransform(390, 0.72, 'translate(-50%,-50%)');
   const crossTransform     = uiDepthTransform(300, 0.83, 'translate(-50%,-50%)');
   const cinemaCtrlTransform= uiDepthTransform(180, 0.84, 'translate(-50%,-50%) translateY(130px)');
-
-  // Jeu custom en mode "tablette" : on considère ça comme une expérience
-  // immersive (comme le mode cinéma) → on masque tout l'arrière-plan
-  // (HUD, rail, dock du bas) et on ne garde que le fond (sky) + la fenêtre du jeu.
-  const isTabletCustomGame = !!(state.activeApp && state.activeApp.startsWith('customgame:') &&
-    (state.customGames||[]).find(g => ('customgame:'+g.id) === state.activeApp)?.mode === 'tablet');
 
   const hideMain = (state.launchpadOpen && !state.activeApp) || (state.cinemaMode && !state.showMenuInCinema) || isTabletCustomGame ? 'none' : '';
 
@@ -429,9 +542,11 @@ function renderMultitaskSlots(side){
     const wrap = document.createElement('div');
     wrap.className = 'multitask-slot-wrap' + (side==='L' ? ' interactive' : '');
     wrap.id = `mtSlotWrap_${side}_${idx}`;
-    wrap.style.cssText = 'position:absolute;transform-origin:center center;pointer-events:'+(side==='L'?'auto':'none')+';z-index:12';
+    // z-index initial (recalculé/maintenu à chaque frame par tickMultitask
+    // pour préserver l'ordre de superposition avant/arrière de la cascade)
+    wrap.style.cssText = 'position:absolute;transform-origin:center center;pointer-events:'+(side==='L'?'auto':'none')+';z-index:'+(20-idx);
     wrap.innerHTML = `
-      <div class="app-window glass" id="mtWinEl_${side}_${idx}" style="width:400px;position:relative;pointer-events:auto;transform:translate(-50%,-50%) scale(0.6)">
+      <div class="app-window glass" id="mtWinEl_${side}_${idx}" style="width:860px;position:relative;pointer-events:auto;transform:translate(-50%,-50%) scale(1)">
         <div class="multitask-badge">${idx+1}</div>
         <div class="app-window-header" style="padding:6px 10px">
           <div class="app-window-title" style="font-size:11px">${app.icon} ${app.name}</div>
@@ -439,7 +554,7 @@ function renderMultitaskSlots(side){
             <div class="app-window-close glass-soft" data-gaze data-action="multitask:close:${idx}" style="width:22px;height:22px;font-size:10px">✕</div>
           </div>
         </div>
-        <div class="app-window-body" style="min-height:180px;max-height:260px;overflow:hidden;font-size:0.75em">
+        <div class="app-window-body" style="min-height:460px;max-height:680px;overflow:hidden;font-size:0.92em">
           ${buildAppBodyHTML(slot.appId)}
         </div>
       </div>`;

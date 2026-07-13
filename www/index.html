@@ -20,6 +20,10 @@
     <!-- ===== FORÇAGE PAYSAGE ===== -->
     <script src="js/core/orientation-lock.js"></script>
     <!-- ===== FIN FORÇAGE PAYSAGE ===== -->
+    <!-- ===== ACCÈS CAMÉRA UNIFIÉ (web + app Capacitor) ===== -->
+    <script src="js/core/media-permissions.js"></script>
+    <!-- ===== DOSSIER PARTAGÉ FICHIERS (web + app Capacitor) ===== -->
+    <script src="js/core/native-media-folder.js"></script>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- ===== MediaPipe Tasks Vision (moderne, WASM + délégation GPU) ===== -->
@@ -37,7 +41,7 @@
           <a-scene embedded vr-mode-ui="enabled:false" device-orientation-permission-ui="enabled:false"
           renderer="antialias:true;colorManagement:true;alpha:true;premultipliedAlpha:false" loading-screen="enabled:false">
           <a-assets>
-          <img id="sky-img" crossorigin="anonymous" src="https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?auto=format&fit=crop&w=2048&q=75">
+          <img id="sky-img" crossorigin="anonymous" src="bg-360-chambre-futuriste.jpg">
           </a-assets>
           <a-sky id="skyL" src="#sky-img" rotation="0 -90 0">
         </a-sky>
@@ -54,6 +58,11 @@
     </a-entity>
     <a-entity id="flatScreenL" geometry="primitive:plane;width:2.4;height:1.35" position="0 1.8 -3.5" visible="false">
   </a-entity>
+  <a-entity id="cinemaGlowL" geometry="primitive:plane;width:3.6;height:2.3" material="shader:flat;color:#7fe9ff;opacity:0.5;transparent:true;side:double" position="0 1.8 -3.7" visible="false"></a-entity>
+  <!-- ===== Navigateur 3D world-locked (WebView-to-Texture) ===== -->
+  <a-plane id="webviewBrowserL" class="clickable" webview-browser-surface="eye: L"
+    width="1.6" height="1.05" position="0 1.55 -2.2" visible="false">
+  </a-plane>
 </a-scene>
 <!-- HUD WORLD-LOCKED -->
 <div class="hud-wrap interactive" id="hudWrapL">
@@ -86,6 +95,9 @@
     <circle cx="17" cy="17" r="14" fill="none" stroke="rgba(255,255,255,.95)" stroke-width="2" stroke-dasharray="88" stroke-dashoffset="88" transform="rotate(-90 17 17)"/>
   </svg>
 </div>
+<!-- ===== Icônes de poignet (façon Meta Quest hand-tracking) ===== -->
+<div class="wrist-icon wrist-icon-menu" id="wristMenuL"><span>☰</span></div>
+<div class="wrist-icon wrist-icon-quick" id="wristQuickL"><span>∞</span></div>
 </div>
 <!-- RIGHT EYE (mirror, non-interactive) -->
 <div class="eye" id="eyeRight">
@@ -104,6 +116,11 @@
 </a-entity>
 <a-entity id="flatScreenR" geometry="primitive:plane;width:2.4;height:1.35" position="0 1.8 -3.5" visible="false">
 </a-entity>
+<a-entity id="cinemaGlowR" geometry="primitive:plane;width:3.6;height:2.3" material="shader:flat;color:#7fe9ff;opacity:0.5;transparent:true;side:double" position="0 1.8 -3.7" visible="false"></a-entity>
+<!-- ===== Navigateur 3D world-locked (WebView-to-Texture), miroir de l'œil gauche ===== -->
+<a-plane id="webviewBrowserR" webview-browser-surface="eye: R"
+  width="1.6" height="1.05" position="0 1.55 -2.2" visible="false">
+</a-plane>
 </a-scene>
 <div class="hud-wrap" id="hudWrapR">
   <div class="hud-center" id="hudCenterR">
@@ -135,6 +152,8 @@
     <circle cx="17" cy="17" r="14" fill="none" stroke="rgba(255,255,255,.95)" stroke-width="2" stroke-dasharray="88" stroke-dashoffset="88" transform="rotate(-90 17 17)"/>
   </svg>
 </div>
+<div class="wrist-icon wrist-icon-menu" id="wristMenuR"><span>☰</span></div>
+<div class="wrist-icon wrist-icon-quick" id="wristQuickR"><span>∞</span></div>
 </div>
 </div>
 <div class="center-hair" aria-hidden="true">
@@ -222,6 +241,13 @@
 <script src="js/media/netflix-playback.js"></script>
 <script src="js/vr-interactions/window-grab-move.js"></script>
 <script src="js/vr-interactions/window-zoom-resize.js"></script>
+
+<!-- Mini-navigateur flottant (corps-verrouillé, redimensionnable) -->
+<!-- stereo:true car le Launchpad rend en double vue (appWindowCenterL/R) -->
+<script>window.VR_BROWSER_CONFIG = { stereo: true };</script>
+<!-- vr-browser.js (bulle de navigateur flottante 2D, head-locked) remplacé par un vrai
+     navigateur 3D world-locked, rendu dans les deux yeux via WebView-to-Texture. -->
+<script src="js/vr-interactions/webview-browser.js"></script>
 <script src="js/vr-interactions/passthrough.js"></script>
 <script src="js/vr-interactions/hand-tracking-vision.js"></script>
 <script src="js/vr-interactions/handTracking.js"></script>

@@ -69,6 +69,8 @@ function resizeImageFileToBlob(file, maxDim = 2048, quality = 0.82){
 }
 
 const SCENES = [
+  { id:'chambre2035', name:'Chambre 2035', desc:'Suite futuriste', url:'bg-360-chambre-futuriste.jpg', main:true },
+  { id:'citeflottante', name:'Cité flottante', desc:'Connect 2035', url:'bg-360-cite-flottante.jpg', main:true },
   { id:'aurora', name:'Aurores',     desc:'Norvège',  url:'https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?auto=format&fit=crop&w=2048&q=75' },
   { id:'desert', name:'Désert',      desc:'Sahara',   url:'https://images.unsplash.com/photo-1473580044384-7ba9967e16a0?auto=format&fit=crop&w=2048&q=75' },
   { id:'ocean',  name:'Océan',       desc:'Maldives', url:'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=2048&q=75' },
@@ -169,7 +171,7 @@ const state = {
   browserState: { currentUrl:'', history:[], histIdx:-1, loading:false, error:null, proxyMode:true },
   gameState:{},
   launchpadOpen:true,
-  launchpadTab:'library', // 'apps', 'library' ou 'fond'
+  launchpadTab:'apps', // 'apps' ou 'fond'
   menuHidden:false,
   showMenuInCinema:false,
   uiDepthExtra:0, // décalage additionnel (px) réglable via le menu de calibration
@@ -270,6 +272,7 @@ const state = {
   multiTaskPickerSlot: null, // index du slot à choisir
   multiTaskSlots: [],   // [{appId, offX, offY}, ...] up to 5
   multiTaskAnchorYaw: 0,
+  multiTaskDistanceScale: 1,   // échelle globale de distance des fenêtres multitâche (0.55–1.45), réglable via le panneau Multitâche
   // === Clavier dock universel ===
   dockKbOpen: false,
   dockKbText: '',

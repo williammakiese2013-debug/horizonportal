@@ -229,7 +229,7 @@ async function firstTap(){
     if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ return; }
     try{
       /* Demande l'accès caméra pour déclencher le prompt système */
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const stream = await window.HorizonMedia.getCameraStream({ video: true });
       /* Couper immédiatement les tracks : on n'a besoin que de la permission */
       stream.getTracks().forEach(t => t.stop());
       toast('✋ Caméra autorisée — Hand Tracking actif');

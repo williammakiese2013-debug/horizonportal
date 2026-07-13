@@ -622,10 +622,27 @@ function buildMultitaskPickerHTML(){
       ).join('')}
     </div>
   ` : `<div style="font-size:10px;opacity:.5;text-align:center;padding:6px">Maximum 5 fenêtres atteint</div>`;
+  const distPct = Math.round((state.multiTaskDistanceScale||1)*100);
+  const distanceControlHTML = `
+    <div class="settings-row" style="flex-wrap:wrap;gap:6px;margin-top:8px">
+      <div class="settings-row-left" style="flex:1;min-width:140px">
+        <span class="settings-row-ico">↔</span>
+        <div>
+          <div class="settings-row-label">Distance des fenêtres</div>
+          <div class="settings-row-sub" id="mtDistVal">${distPct}%</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:4px;align-items:center">
+        <div class="settings-depth-btn" data-gaze data-action="multitaskDist:-10" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;font-weight:700">−</div>
+        <input type="range" id="mtRngDistance" min="55" max="145" step="5" value="${distPct}" style="width:100px;height:4px;accent-color:#c6ff3d">
+        <div class="settings-depth-btn" data-gaze data-action="multitaskDist:10" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;font-weight:700">+</div>
+      </div>
+    </div>`;
   return `<div class="multitask-picker glass">
     <div class="multitask-picker-title">⊞ Multitâche — Fenêtres ouvertes</div>
     <div class="multitask-slot-list">${slotsHTML}</div>
     ${addAppsHTML}
+    ${distanceControlHTML}
     <div style="display:flex;gap:8px;margin-top:8px;justify-content:flex-end">
       <div class="pill glass-soft" data-gaze data-action="multitask:closeAll" style="font-size:10px;padding:5px 10px">Tout fermer</div>
       <div class="pill glass-soft" data-gaze data-action="closeMultitaskPicker" style="font-size:10px;padding:5px 10px">← Retour</div>
@@ -648,10 +665,13 @@ const LP_FOND_ICON = 'data:image/svg+xml;utf8,' + encodeURIComponent(`
 </svg>`);
 
 function buildLaunchpadHTML(){
-  const tab = state.launchpadTab || 'library';
+  const tab = state.launchpadTab || 'apps';
   const tabsBar = `<div class="launchpad-tabs">
     <div class="launchpad-tab" data-active="${tab==='apps'}" data-gaze data-action="launchpad:tab:apps">
       <span class="lp-tab-ico">▦</span><span>Apps</span>
+    </div>
+    <div class="launchpad-tab" data-active="${tab==='galerie'}" data-gaze data-action="launchpad:tab:galerie">
+      <span class="lp-tab-ico">📁</span><span>Galerie</span>
     </div>
     <div class="launchpad-tab" data-active="${tab==='library'}" data-gaze data-action="launchpad:tab:library">
       <span class="lp-tab-ico">🗂️</span><span>Library</span>
@@ -673,22 +693,128 @@ function buildLaunchpadHTML(){
       }).join('')}
     </div>`;
 
-  const bgGridHTML = `<div class="lp-bg-grid" style="max-height:56vh;overflow-y:auto">
+  const mainScenes = SCENES.filter(s => s.main);
+  const otherIsCurrent = mainScenes.length === 2 && state.scene && state.scene.id === mainScenes[1].id;
+  const toggleTargetName = mainScenes.length === 2 ? (otherIsCurrent ? mainScenes[0].name : mainScenes[1].name) : '';
+  const toggleBtnHTML = mainScenes.length === 2 ? `
+    <div class="pill glass-soft" data-gaze data-action="scene:toggleMain"
+         style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:9px 14px;font-size:12px;cursor:pointer">
+      <span style="font-size:15px">🔄</span>
+      <span>Basculer le fond principal → <b>${toggleTargetName}</b></span>
+    </div>` : '';
+
+  const bgGridHTML = `<div class="lp-bg-tab-wrap">
+    ${toggleBtnHTML}
+    <div class="lp-bg-grid" style="max-height:56vh;overflow-y:auto">
       ${SCENES.map(s => `
         <div class="lp-bg" data-gaze data-action="scene:${s.id}" style="background-image:url('${s.url}')">
+          ${s.main ? `<div class="lp-bg-main-badge" style="position:absolute;top:6px;right:6px;background:rgba(10,124,255,.85);color:#fff;font-size:9px;padding:2px 6px;border-radius:8px">Principal</div>` : ''}
           <div class="lp-bg-label">${s.name}</div>
         </div>`).join('')}
-    </div>`;
+    </div>
+  </div>`;
 
   const libraryHTML = tab === 'library' ? buildLaunchpadLibraryHTML() : '';
+  const galerieHTML = tab === 'galerie' ? buildLaunchpadGalerieHTML() : '';
 
   return `<div class="launchpad" style="position:relative">
     <div class="launchpad-title">Launchpad</div>
-    ${tab === 'fond' ? bgGridHTML : tab === 'library' ? libraryHTML : appsGridHTML}
     ${tabsBar}
+    ${tab === 'fond' ? bgGridHTML : tab === 'library' ? libraryHTML : tab === 'galerie' ? galerieHTML : appsGridHTML}
     <div class="launchpad-exit glass-soft" data-gaze data-action="closeLaunchpad">✕ Fermer</div>
     ${state.addGameModalOpen ? buildAddGameModalHTML() : ''}
   </div>`;
+}
+
+/* ------------ Launchpad · onglet Galerie (Galerie / Scènes / VR Meet Up /
+   Divertissement) — anciennement affiché en permanence sur le grand écran
+   d'accueil (buildDockHTML), déplacé ici pour ne plus flotter en continu
+   devant l'utilisateur : on n'y accède plus que depuis le Launchpad. ------- */
+function buildLaunchpadGalerieHTML(){
+  const vhTab = state.vhHomeTab || 'galerie';
+
+  const subTabsHTML = `<div class="vh-tabbar" style="margin-bottom:10px">
+    <div class="vh-tab${vhTab==='galerie'?' active':''}" data-gaze data-action="vhTab:galerie">📁 Galerie</div>
+    <div class="vh-tab${vhTab==='scenes'?' active':''}" data-gaze data-action="vhTab:scenes">🌍 Scènes</div>
+    <div class="vh-tab${vhTab==='vrmeetup'?' active':''}" data-gaze data-action="vhTab:vrmeetup">👥 VR Meet Up</div>
+    <div class="vh-tab${vhTab==='entertainment'?' active':''}" data-gaze data-action="vhTab:entertainment">🎬 Divertissement</div>
+  </div>`;
+
+  let tabContent = '';
+  if(vhTab === 'galerie'){
+    const userItems = state.userMedia;
+    const exterieurs = SCENES.slice(0, 16);
+    const interieurs = SCENES.slice(16);
+    const renderSection = (title, items) => items.length === 0 ? '' : `
+      <div style="font-size:11px;font-weight:600;opacity:.7;margin:10px 0 5px;letter-spacing:.5px">${title}</div>
+      <div class="grid-4">${items.map(i => thumbHtml(i, true)).join('')}</div>
+    `;
+    tabContent = `
+    <div id="galleryScroll" style="max-height:56vh;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth;padding-right:4px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;opacity:.8">📁 Galerie & Arrière-plans</div>
+        <div class="pill glass-soft" style="font-size:9px" data-gaze data-action="addFiles">＋ Importer</div>
+      </div>
+      ${userItems.length > 0 ? `
+        <div style="font-size:11px;font-weight:600;opacity:.7;margin:4px 0 5px">📁 Mes médias</div>
+        <div class="grid-4">
+          <div class="add-btn" data-gaze data-action="addFiles">＋ Ajouter</div>
+          ${userItems.map(i => thumbHtml(i, true)).join('')}
+        </div>
+      ` : `<div class="add-btn" style="margin-bottom:10px" data-gaze data-action="addFiles">＋ Ajouter une photo / vidéo 360°</div>`}
+      ${renderSection('🌿 Extérieurs & Nature', exterieurs)}
+      ${renderSection('🏠 Intérieurs', interieurs)}
+    </div>
+    <div class="gaze-scroll-bar">
+      <div class="gaze-scroll-btn" data-gaze data-action="gallery-scroll-up">▲</div>
+      <div class="gaze-scroll-btn" data-gaze data-action="gallery-scroll-up2" style="font-size:12px;opacity:.7">▲▲</div>
+      <div style="width:2px;height:18px;background:rgba(255,255,255,.2);border-radius:2px;margin:0 auto"></div>
+      <div class="gaze-scroll-btn" data-gaze data-action="gallery-scroll-down2" style="font-size:12px;opacity:.7">▼▼</div>
+      <div class="gaze-scroll-btn" data-gaze data-action="gallery-scroll-down">▼</div>
+    </div>`;
+  } else if(vhTab === 'scenes'){
+    const exterieurs = SCENES.slice(0,8);
+    const interieurs = SCENES.slice(8,16);
+    tabContent = `
+    <div id="galleryScroll" style="max-height:56vh;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth">
+      <div style="font-size:11px;font-weight:600;opacity:.7;margin:4px 0 5px">🌿 Extérieurs</div>
+      <div class="grid-4">${exterieurs.map(i => thumbHtml(i, true)).join('')}</div>
+      <div style="font-size:11px;font-weight:600;opacity:.7;margin:10px 0 5px">🏠 Intérieurs</div>
+      <div class="grid-4">${interieurs.map(i => thumbHtml(i, true)).join('')}</div>
+    </div>`;
+  } else if(vhTab === 'vrmeetup'){
+    tabContent = `<div style="text-align:center;padding:30px 20px">
+      <div style="font-size:40px;margin-bottom:12px">👥</div>
+      <div style="font-size:16px;font-weight:700;margin-bottom:8px">VR Meet Up</div>
+      <div style="font-size:12px;opacity:.6;margin-bottom:18px">Retrouve tes amis dans l'espace virtuel</div>
+      <div class="pill glass-soft" style="display:inline-block" data-gaze data-action="toast:Rejoindre">🚀 Rejoindre une salle</div>
+    </div>`;
+  } else if(vhTab === 'entertainment'){
+    tabContent = `<div style="display:flex;flex-direction:column;gap:10px;padding:10px 0">
+      <div style="font-size:12px;font-weight:700;opacity:.8;margin-bottom:4px">🎬 Divertissement</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="tile glass-soft" data-gaze data-action="app:netflix" style="flex:1;min-width:80px;align-items:center;padding:14px">
+          <div style="font-size:24px;color:#e50914;font-weight:900">N</div><div class="tile-sub">Netflix</div>
+        </div>
+        <div class="tile glass-soft" data-gaze data-action="app:appletv" style="flex:1;min-width:80px;align-items:center;padding:14px">
+          <div style="font-size:24px">📺</div><div class="tile-sub">Apple TV</div>
+        </div>
+        <div class="tile glass-soft" data-gaze data-action="app:disney" style="flex:1;min-width:80px;align-items:center;padding:14px">
+          <div style="font-size:16px;color:#4d9fff;font-weight:900">Disney+</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <div class="tile glass-soft" data-gaze data-action="app:youtube" style="flex:1;align-items:center;padding:12px">
+          <div style="font-size:22px">▶️</div><div class="tile-sub">YouTube</div>
+        </div>
+        <div class="tile glass-soft" data-gaze data-action="app:applemusic" style="flex:1;align-items:center;padding:12px">
+          <div style="font-size:22px">🎵</div><div class="tile-sub">Apple Music</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  return `<div>${subTabsHTML}${tabContent}</div>`;
 }
 
 /* ------------ Launchpad · onglet Library (façon Meta Quest) ------------ */
@@ -744,6 +870,13 @@ function buildLaunchpadLibraryHTML(){
       <div class="lib-tile-name">Ajouter un jeu</div>
     </div>` : '';
 
+  const cinemaTileHTML = (filter!=='worlds') ? `
+    <div class="lib-tile lib-tile-cinema" data-gaze data-action="cinemaroom:pick">
+      <div class="lib-tile-ico"><span>🎬</span></div>
+      <div class="lib-tile-name">Cinéma</div>
+      <div class="lib-tile-sub">Choisir un film/série</div>
+    </div>` : '';
+
   const emptyHTML = (filter==='downloads' && !customGames.length) ? `
     <div style="grid-column:1/-1;text-align:center;opacity:.55;padding:16px;font-size:12px">
       Aucun jeu téléchargé. Ajoutez un jeu HTML/JS ci-dessous.
@@ -763,6 +896,7 @@ function buildLaunchpadLibraryHTML(){
       <div class="library-grid">
         ${appTiles}
         ${gameTiles}
+        ${cinemaTileHTML}
         ${addTileHTML}
         ${emptyHTML}
       </div>
@@ -838,7 +972,13 @@ function buildCustomGameTabletHTML(id){
         </div>
       </div>
     </div>` : '';
-  return `<div class="app-window glass" id="appWinEl" style="width:760px;position:relative;padding:0;overflow:hidden">
+  const stylusHeld = state.cgStylusHeld === true;
+  const stylusDock = `<div class="cg-stylus-dock${stylusHeld?' held':''}" id="cgStylusDock"
+    data-gaze data-action="customgame:stylus:toggle"
+    title="${stylusHeld ? 'Reposer le stylet' : 'Prendre le stylet'}">🖊️</div>`;
+  return `<div class="app-window glass cg-tablet-shell" id="appWinEl" style="width:760px;position:relative;padding:0;overflow:hidden">
+    <div class="cg-tablet-camera-dot"></div>
+    ${stylusDock}
     <div class="app-window-header">
       <div class="app-window-title">🎮 ${escapeHtml(game.name)} <span style="opacity:.5;font-size:10px;margin-left:6px">🖥️ Mode tablette</span></div>
       <div style="display:flex;gap:8px;align-items:center">
@@ -851,7 +991,7 @@ function buildCustomGameTabletHTML(id){
     <div class="app-window-body" style="min-height:480px;padding:0;overflow:hidden;display:flex;flex-direction:column">
       <iframe class="customgame-frame" id="cgFrame" sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups"
         allow="xr-spatial-tracking; camera; microphone; autoplay; gamepad"
-        src="${customGameFileUrl(game.id, game.entryFile || 'index.html')}" style="flex:1;min-height:0"></iframe>
+        src="${(state.customGameRuntimeUrls && state.customGameRuntimeUrls[game.id]) || ''}" style="flex:1;min-height:0"></iframe>
       ${controlsPanel}
     </div>
     ${resizeHandle}${depthBar}

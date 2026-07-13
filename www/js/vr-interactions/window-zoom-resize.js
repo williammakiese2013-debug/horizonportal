@@ -156,33 +156,83 @@ function tickDragGaze(){
 requestAnimationFrame(tickDragGaze);
 
 /* ------------ Multitâche — positions monde fixes (world-locked) ------------ */
-// Positions 3D fixes dans le monde (ne suivent pas la tête)
-// Captées au moment où l'utilisateur active le multitâche
+// Positions 3D fixes dans le monde (ne suivent pas la tête).
+// Toutes les fenêtres restent DEVANT l'utilisateur (pas loin sur les
+// côtés) : la principale au centre, les suivantes juste à sa gauche/droite
+// ou juste au-dessus, en se chevauchant légèrement (effet "cascade").
+// Captées au moment où l'utilisateur active le multitâche.
 const MT_WORLD_POSITIONS = [
-  new THREE.Vector3( 0,    2.0, -3.5),  // slot 0: centre haut
-  new THREE.Vector3( 2.8,  1.6, -3.2),  // slot 1: droite
-  new THREE.Vector3(-2.8,  1.6, -3.2),  // slot 2: gauche
-  new THREE.Vector3( 1.6,  2.5, -3.8),  // slot 3: haut droite
-  new THREE.Vector3(-1.6,  2.5, -3.8),  // slot 4: haut gauche
+  new THREE.Vector3( 0,    1.7,  -3.4),  // slot 0: centre, pile devant (la plus proche/grande)
+  new THREE.Vector3( 1.4,  1.75, -3.6),  // slot 1: juste à droite du centre, chevauche légèrement
+  new THREE.Vector3(-1.4,  1.75, -3.6),  // slot 2: juste à gauche du centre
+  new THREE.Vector3( 0.4,  2.75, -3.9),  // slot 3: au-dessus, légèrement décalé
+  new THREE.Vector3(-0.5,  2.8,  -4.1),  // slot 4: au-dessus, de l'autre côté
 ];
+
+// Légère bascule (rotateY) par fenêtre pour donner une impression de
+// "face" et de "dos" dans l'empilement (des panneaux tournés les uns par
+// rapport aux autres), tout en restant clairement tournés vers l'utilisateur
+// (angles faibles — on veut un effet de profondeur, pas des fenêtres de
+// travers qui semblent regarder ailleurs).
+const MT_SLOT_TILT_DEG = [0, -4, 4, -3, 3];
+
+// Distance de référence à laquelle la taille de base de la fenêtre
+// (voir renderMultitaskSlots) est censée paraître "normale". worldToScreen()
+// ne fait que projeter une POSITION — il ne rétrécit pas la fenêtre avec
+// la distance — donc sans ce facteur, éloigner une fenêtre la déplaçait
+// juste vers le centre de l'écran sans jamais la faire paraître plus
+// petite/lointaine. On calcule ici un vrai facteur d'échelle en
+// perspective (plus loin = plus petit), appliqué en plus de l'échelle de
+// zoom manuel (state.windowScale n'affecte que la fenêtre "single") et de
+// l'échelle de distance réglable par l'utilisateur (state.multiTaskDistanceScale).
+const MT_REF_DISTANCE = 4.0;
+const MT_MIN_SCALE = 0.55;
+const MT_MAX_SCALE = 1.15;
+const MT_BASE_SCALE = 0.55;   // taille modérée (le "5 fois moins" précédent était une expression, pas littéral — 0.2 rendait les fenêtres invisibles)
+
+// Bornes de la molette "Distance des fenêtres" (panneau Multitâche) : on
+// reste dans un intervalle qui évite à la fois un entassement contre le
+// visage et un éparpillement trop lointain/illisible.
+const MT_DIST_SCALE_MIN = 0.55;
+const MT_DIST_SCALE_MAX = 1.45;
 
 function tickMultitask(){
   if(state.multiTaskMode && state.multiTaskSlots.length && camL.object3D){
     const o3d = camL.object3D;
+    const distScale = Math.max(MT_DIST_SCALE_MIN, Math.min(MT_DIST_SCALE_MAX, state.multiTaskDistanceScale || 1));
     state.multiTaskSlots.forEach((slot, idx)=>{
-      // Calculer la position monde en tenant compte du yaw initial
-      const basePos = MT_WORLD_POSITIONS[idx] ? MT_WORLD_POSITIONS[idx].clone() : new THREE.Vector3(0,1.8,-3.5);
+      // Calculer la position monde en tenant compte du yaw initial.
+      // L'échelle de distance réglable s'applique sur X/Z uniquement (le
+      // décalage en hauteur Y reste stable pour ne pas faire "sauter" les
+      // fenêtres verticalement quand on ajuste la molette).
+      const raw = MT_WORLD_POSITIONS[idx] || new THREE.Vector3(0,1.8,-3.5);
+      const basePos = new THREE.Vector3(raw.x * distScale, raw.y, raw.z * distScale);
       // Appliquer le yaw initial pour que les fenêtres soient ancrées devant l'utilisateur au moment de l'activation
       const anchorYaw = state.multiTaskAnchorYaw || 0;
       const rotated = basePos.clone().applyAxisAngle(new THREE.Vector3(0,1,0), anchorYaw);
 
       const screen = worldToScreen(rotated, o3d);
+
+      // Distance réelle caméra <-> fenêtre (même repère que worldToScreen)
+      const local = rotated.clone();
+      o3d.worldToLocal(local);
+      const dist = Math.max(0.01, -local.z);
+      const perspectiveScale = Math.max(MT_MIN_SCALE, Math.min(MT_MAX_SCALE, MT_REF_DISTANCE / dist));
+      const tilt = MT_SLOT_TILT_DEG[idx] || 0;
+
       for(const side of ['L','R']){
         const wrap = document.getElementById(`mtSlotWrap_${side}_${idx}`);
+        const winEl = document.getElementById(`mtWinEl_${side}_${idx}`);
         if(wrap && screen){
           wrap.style.left = screen.px + 'px';
           wrap.style.top  = screen.py + 'px';
           wrap.style.display = '';
+          // z-index : la fenêtre au premier plan (indice le plus bas, voir
+          // MT_WORLD_POSITIONS) reste toujours visuellement devant les
+          // autres, pour un vrai effet de "pile" (superposition avant/arrière).
+          wrap.style.zIndex = String(20 - idx);
+          if(winEl) winEl.style.transform =
+            `translate(-50%,-50%) perspective(1000px) rotateY(${tilt}deg) scale(${(MT_BASE_SCALE * perspectiveScale).toFixed(3)})`;
         } else if(wrap){
           // Derrière la caméra — cacher
           wrap.style.display = 'none';
@@ -193,6 +243,7 @@ function tickMultitask(){
   requestAnimationFrame(tickMultitask);
 }
 requestAnimationFrame(tickMultitask);
+
 
 
 function tickResizeGaze(){
@@ -268,12 +319,12 @@ function gazeTick(){
     }
   }
   let progress = 0;
-  /* En mode hand tracking, AUCUNE sélection par dwell (main/doigt tenu
-     immobile) ne se déclenche plus, même avec le geste "doigt pointé" :
-     le seul moyen de cliquer est désormais le pincement (pouce+index),
-     détecté instantanément par window.__handTrackPinchClick(). Le rond
-     blanc de progression reste réservé au regard (gaze), quand le hand
-     tracking est désactivé. */
+  /* En mode hand tracking, ce dwell-ci (regard) reste désactivé — le clic
+     main utilise son propre système de tenue (pointer l'index et
+     l'immobiliser un instant), géré séparément dans handTracking.js /
+     handPointer.js avec son propre anneau de progression. Le rond blanc
+     ci-dessous reste réservé au regard (gaze), quand le hand tracking est
+     désactivé. */
   if(gazeTarget && !handActive){
     const action = gazeTarget.getAttribute('data-action');
     const dwell = (action === 'cinema:scrub:confirm' || action === 'resize:confirm' || action === 'drag:confirm') ? 2000 : (state.activeApp === 'sims3' ? 1500 : DWELL);

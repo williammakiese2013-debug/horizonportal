@@ -26,7 +26,7 @@ function handleNetflixAction(action){
           state.netflixWaitingImport = false;
           document.removeEventListener('click', handler);
           const nfi = document.getElementById('netflixFileInput');
-          if(nfi) nfi.click();
+          if(nfi){ window.NativeMediaFolder ? NativeMediaFolder.openFor(nfi) : nfi.click(); }
         };
         document.addEventListener('click', handler);
       }
@@ -81,7 +81,7 @@ function handleNetflixAction(action){
         const handler = ()=>{
           document.removeEventListener('click', handler);
           const stfi = document.getElementById('stFileInput');
-          if(stfi){ stfi.setAttribute('data-key', key); stfi.click(); }
+          if(stfi){ stfi.setAttribute('data-key', key); window.NativeMediaFolder ? NativeMediaFolder.openFor(stfi) : stfi.click(); }
         };
         document.addEventListener('click', handler);
       }
@@ -165,7 +165,7 @@ function handleNetflixAction(action){
     const handler = ()=>{
       document.removeEventListener('click', handler);
       const sfi = document.getElementById('seriesFileInput');
-      if(sfi){ sfi.setAttribute('data-key', dbKey); sfi.click(); }
+      if(sfi){ sfi.setAttribute('data-key', dbKey); window.NativeMediaFolder ? NativeMediaFolder.openFor(sfi) : sfi.click(); }
     };
     document.addEventListener('click', handler);
     return;
@@ -253,7 +253,7 @@ function handleNetflixAction(action){
     const handler = ()=>{
       document.removeEventListener('click', handler);
       const afi = document.getElementById('animeFileInput');
-      if(afi){ afi.setAttribute('data-key', dbKey); afi.click(); }
+      if(afi){ afi.setAttribute('data-key', dbKey); window.NativeMediaFolder ? NativeMediaFolder.openFor(afi) : afi.click(); }
     };
     document.addEventListener('click', handler);
     return;
@@ -290,7 +290,7 @@ function handleNetflixAction(action){
     const handler = ()=>{
       document.removeEventListener('click', handler);
       const ci = document.getElementById('creatorCoverInput');
-      if(ci) ci.click();
+      if(ci){ window.NativeMediaFolder ? NativeMediaFolder.openFor(ci) : ci.click(); }
     };
     document.addEventListener('click', handler);
     return;
@@ -335,7 +335,7 @@ function handleNetflixAction(action){
     const handler = ()=>{
       document.removeEventListener('click', handler);
       const ufi = document.getElementById('userContentFileInput');
-      if(ufi){ ufi.setAttribute('data-ucid', ucId); ufi.click(); }
+      if(ufi){ ufi.setAttribute('data-ucid', ucId); window.NativeMediaFolder ? NativeMediaFolder.openFor(ufi) : ufi.click(); }
     };
     document.addEventListener('click', handler);
     return;
@@ -615,6 +615,186 @@ document.addEventListener('change', (e)=>{
   });
 });
 
+/* ============================================================
+   APP CINÉMA — décor de salle + lumière d'ambiance selon le film
+   ============================================================
+   Réutilise entièrement le système d'écran plat existant
+   (showFlatScreen/hideFlatScreen/positionFlatScreen) : on ne fait
+   qu'ajouter, autour, un décor de salle de cinéma (fond 360°) et une
+   lueur colorée derrière l'écran qui suit les couleurs moyennes de
+   l'image en cours, façon "Ambilight", pour se sentir vraiment dans
+   la salle plutôt que devant un simple écran flottant.
+   ============================================================ */
+/* ============================================================
+   SON "CINÉMA" — un peu de coffre et de punch sur la vidéo
+   ============================================================
+   Chaîne Web Audio branchée UNE SEULE FOIS sur #userVid (on ne peut
+   créer qu'un seul MediaElementSource par <video>, donc le graphe est
+   construit une fois puis réutilisé/réglé à chaque séance) :
+     source → grave (low-shelf) → aigu/présence (high-shelf)
+            → compresseur (punch, dynamique resserrée comme un mixage
+              cinéma) → gain de rattrapage → sortie.
+   Hors mode Cinéma, la chaîne reste en place mais réglée neutre, pour
+   ne rien changer aux autres lectures vidéo de l'app.
+   ============================================================ */
+let _cinemaAudioCtx = null;
+/* Un <video> routé dans le Web Audio (createMediaElementSource) perd TOUT
+   son son si l'AudioContext reste "suspended" — et l'évènement 'change'
+   d'un <input type=file> n'est pas toujours considéré comme un geste
+   utilisateur suffisant par les navigateurs pour autoriser sa reprise.
+   On crée/relance donc le contexte dès le tout premier clic réel de la
+   personne (celui qui suit le toast "Touchez l'écran..."), qui lui EST
+   toujours un geste utilisateur valide. */
+function _unlockCinemaAudio(){
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if(!Ctx) return;
+  if(!_cinemaAudioCtx) _cinemaAudioCtx = new Ctx();
+  if(_cinemaAudioCtx.state === 'suspended') _cinemaAudioCtx.resume().catch(()=>{});
+}
+document.addEventListener('pointerdown', _unlockCinemaAudio);
+document.addEventListener('click', _unlockCinemaAudio);
+let _cinemaAudioNodes = null;
+
+function ensureCinemaAudioGraph(videoEl){
+  if(!videoEl || videoEl._cinemaAudioRigged) return;
+  try{
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if(!Ctx) return;
+    if(!_cinemaAudioCtx) _cinemaAudioCtx = new Ctx();
+    const ctx = _cinemaAudioCtx;
+    const source = ctx.createMediaElementSource(videoEl);
+    const bass = ctx.createBiquadFilter();
+    bass.type = 'lowshelf'; bass.frequency.value = 150; bass.gain.value = 0;
+    const treble = ctx.createBiquadFilter();
+    treble.type = 'highshelf'; treble.frequency.value = 3500; treble.gain.value = 0;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -50; comp.knee.value = 30; comp.ratio.value = 3;
+    comp.attack.value = 0.003; comp.release.value = 0.25;
+    const makeup = ctx.createGain();
+    makeup.gain.value = 1.0;
+    source.connect(bass); bass.connect(treble); treble.connect(comp);
+    comp.connect(makeup); makeup.connect(ctx.destination);
+    _cinemaAudioNodes = { bass, treble, comp, makeup };
+    videoEl._cinemaAudioRigged = true;
+  }catch(_e){ /* Web Audio indisponible : la vidéo garde son son normal */ }
+}
+
+function setCinemaAudioIntensity(active){
+  if(_cinemaAudioCtx && _cinemaAudioCtx.state === 'suspended') _cinemaAudioCtx.resume().catch(()=>{});
+  if(!_cinemaAudioNodes) return;
+  const { bass, treble, comp, makeup } = _cinemaAudioNodes;
+  const t = (_cinemaAudioCtx.currentTime || 0) + 0.05;
+  if(active){
+    bass.gain.linearRampToValueAtTime(7, t);
+    treble.gain.linearRampToValueAtTime(3, t);
+    comp.threshold.linearRampToValueAtTime(-28, t);
+    comp.ratio.linearRampToValueAtTime(5, t);
+    makeup.gain.linearRampToValueAtTime(1.18, t);
+  } else {
+    bass.gain.linearRampToValueAtTime(0, t);
+    treble.gain.linearRampToValueAtTime(0, t);
+    comp.threshold.linearRampToValueAtTime(-50, t);
+    comp.ratio.linearRampToValueAtTime(3, t);
+    makeup.gain.linearRampToValueAtTime(1.0, t);
+  }
+}
+
+let _cinemaPrevSkySrc = null;
+let _cinemaPrevScreenPrefs = null;
+let _cinemaGlowTimer = null;
+let _cinemaSampleCanvas = null;
+
+function startCinemaScreening(media){
+  const skyL = document.getElementById('skyL');
+  const skyR = document.getElementById('skyR');
+  const cinemaScene = (typeof SCENES !== 'undefined' ? SCENES : []).find(s => s.id === 'cinema');
+  if(skyL && skyR && cinemaScene){
+    _cinemaPrevSkySrc = skyL.getAttribute('src');
+    skyL.setAttribute('src', cinemaScene.url);
+    skyR.setAttribute('src', cinemaScene.url);
+  }
+
+  // Recentre la salle pile devant l'endroit où l'on regarde à l'instant du
+  // lancement (niveau, sans le tangage courant) : l'écran du film se
+  // superpose ainsi directement dans l'axe de vue, comme un vrai écran de
+  // cinéma bien en face, plutôt que de risquer d'apparaître derrière/de
+  // travers par rapport à la salle.
+  if(typeof camL !== 'undefined' && camL && camL.object3D){
+    state.initYaw = camL.object3D.rotation.y;
+    state.initPitch = 0;
+  }
+
+  // Taille/distance "grand écran de salle" — plus large et plus loin que
+  // le petit écran perso par défaut — appliquées temporairement le temps
+  // de la séance, puis restaurées ensuite pour ne pas changer vos réglages
+  // habituels de "Mode Écran".
+  const wEl = document.getElementById('rngScreenWidth');
+  const hEl = document.getElementById('rngScreenHeight');
+  const dEl = document.getElementById('rngScreenDistance');
+  if(wEl && hEl && dEl){
+    _cinemaPrevScreenPrefs = { w: wEl.value, h: hEl.value, d: dEl.value };
+    wEl.value = '6.4'; hEl.value = '3.6'; dEl.value = '6.5';
+  }
+
+  state.__cinemaActive = true;
+  media.type = 'cinema';
+  showFlatScreen(media);
+  positionFlatScreen();
+  const vidEl = document.getElementById('userVid');
+  if(vidEl){
+    ensureCinemaAudioGraph(vidEl);
+    setCinemaAudioIntensity(true);
+  }
+  startCinemaAmbientGlow();
+  toast('🎬 Séance lancée : ' + media.name);
+}
+
+function startCinemaAmbientGlow(){
+  stopCinemaAmbientGlow();
+  if(!_cinemaSampleCanvas){
+    _cinemaSampleCanvas = document.createElement('canvas');
+    _cinemaSampleCanvas.width = 16; _cinemaSampleCanvas.height = 9;
+  }
+  for(const side of ['L','R']){
+    const g = document.getElementById('cinemaGlow'+side);
+    if(g) g.setAttribute('visible', 'true');
+  }
+  _cinemaGlowTimer = setInterval(sampleCinemaGlowColor, 450);
+  sampleCinemaGlowColor();
+}
+
+function stopCinemaAmbientGlow(){
+  if(_cinemaGlowTimer){ clearInterval(_cinemaGlowTimer); _cinemaGlowTimer = null; }
+  for(const side of ['L','R']){
+    const g = document.getElementById('cinemaGlow'+side);
+    if(g) g.setAttribute('visible', 'false');
+  }
+}
+
+function sampleCinemaGlowColor(){
+  const v = document.getElementById('userVid');
+  if(!v || v.paused || v.readyState < 2 || !_cinemaSampleCanvas) return;
+  try{
+    const ctx = _cinemaSampleCanvas.getContext('2d');
+    ctx.drawImage(v, 0, 0, 16, 9);
+    const data = ctx.getImageData(0, 0, 16, 9).data;
+    let r=0,g=0,b=0, n=0;
+    for(let i=0;i<data.length;i+=4){ r+=data[i]; g+=data[i+1]; b+=data[i+2]; n++; }
+    r = Math.round(r/n); g = Math.round(g/n); b = Math.round(b/n);
+    // Léger boost de saturation pour que la lueur reste visible même sur des scènes sombres/grises
+    const max = Math.max(r,g,b) || 1;
+    const boost = Math.min(1.6, 200/max);
+    r = Math.min(255, Math.round(r*boost));
+    g = Math.min(255, Math.round(g*boost));
+    b = Math.min(255, Math.round(b*boost));
+    const hex = '#' + [r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');
+    for(const side of ['L','R']){
+      const el = document.getElementById('cinemaGlow'+side);
+      if(el) el.setAttribute('material', 'color', hex);
+    }
+  }catch(_e){ /* frame pas encore décodée / cross-origin : on retentera au prochain tick */ }
+}
+
 /* ------------ Flat screen (Mode Écran) ------------ */
 function setHUDVisible(visible){
   const v = visible ? '' : 'none';
@@ -671,6 +851,27 @@ function hideFlatScreen(){
   const v = document.getElementById('userVid');
   if(v){ v.pause(); v.src=''; v.load(); }
   state.screenMedia = null;
+  if(state.__cinemaActive){
+    state.__cinemaActive = false;
+    stopCinemaAmbientGlow();
+    setCinemaAudioIntensity(false);
+    const skyL = document.getElementById('skyL');
+    const skyR = document.getElementById('skyR');
+    if(skyL && skyR){
+      skyL.setAttribute('src', _cinemaPrevSkySrc || '#sky-img');
+      skyR.setAttribute('src', _cinemaPrevSkySrc || '#sky-img');
+    }
+    _cinemaPrevSkySrc = null;
+    if(_cinemaPrevScreenPrefs){
+      const wEl = document.getElementById('rngScreenWidth');
+      const hEl = document.getElementById('rngScreenHeight');
+      const dEl = document.getElementById('rngScreenDistance');
+      if(wEl) wEl.value = _cinemaPrevScreenPrefs.w;
+      if(hEl) hEl.value = _cinemaPrevScreenPrefs.h;
+      if(dEl) dEl.value = _cinemaPrevScreenPrefs.d;
+      _cinemaPrevScreenPrefs = null;
+    }
+  }
   renderHUD();
 }
 function positionFlatScreen(){
@@ -687,6 +888,20 @@ function positionFlatScreen(){
   for(const id of ['flatScreenL','flatScreenR']){
     const el = document.getElementById(id);
     if(el){ el.setAttribute('position',s); el.setAttribute('rotation',rot); }
+  }
+  if(state.__cinemaActive){
+    // Le halo est légèrement plus loin (derrière l'écran) et un peu plus grand,
+    // pour "déborder" tout autour comme une vraie lumière d'ambiance.
+    const glowDist = dist + 0.25;
+    const gBaseY = 1.8 + Math.sin(pitch) * glowDist;
+    const gBaseZ = -Math.cos(pitch) * glowDist;
+    const gPos = new THREE.Vector3(0, gBaseY, gBaseZ);
+    gPos.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    const gs = gPos.x+' '+gPos.y+' '+gPos.z;
+    for(const id of ['cinemaGlowL','cinemaGlowR']){
+      const el = document.getElementById(id);
+      if(el){ el.setAttribute('position', gs); el.setAttribute('rotation', rot); }
+    }
   }
 }
 /* ------------ Touch bar pour réafficher le menu en mode cinéma ------------ */

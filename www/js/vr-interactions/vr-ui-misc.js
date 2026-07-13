@@ -102,6 +102,21 @@
     ctrls.uiDepth = { input, apply };
   })();
 
+  /* --- Distance des fenêtres Multitâche (panneau ⊞ Multitâche) ---
+     Slider réel #mtRngDistance, recréé à chaque renderHUD() (innerHTML) —
+     on écoute donc en délégation sur `document`, comme pour settingsRngDepth. */
+  document.addEventListener('input', function(e){
+    if(e.target.id !== 'mtRngDistance') return;
+    const pct = Math.max(55, Math.min(145, parseInt(e.target.value,10) || 100));
+    state.multiTaskDistanceScale = pct/100;
+    const label = document.getElementById('mtDistVal');
+    if(label) label.textContent = pct + '%';
+    // Pas de renderHUD() ici : tickMultitask() lit state.multiTaskDistanceScale
+    // en continu et repositionne déjà les fenêtres à chaque frame — un
+    // renderHUD() complet pendant le drag du slider recréerait le panneau
+    // (et donc le slider lui-même) à chaque tick, ce qui casserait le drag.
+  });
+
   reset.addEventListener('click', ()=>{
     for(const [varName, def] of Object.entries(defaults)){
       const ctrl = ctrls[varName];
