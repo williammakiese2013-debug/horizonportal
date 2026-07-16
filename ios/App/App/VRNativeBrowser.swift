@@ -33,7 +33,7 @@ import Capacitor
 @objc(WebViewTexturePlugin)
 public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate {
 
-    private var webView: WKWebView?
+    private var vrWebView: WKWebView?
     private var containerView: UIView?
     private var displayLink: CADisplayLink?
 
@@ -62,7 +62,7 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate {
     }
 
     @objc func tap(_ call: CAPPluginCall) {
-        guard let webView = webView else { call.reject("No active webview. Call load() first."); return }
+        guard let vrWebView = webView else { call.reject("No active webview. Call load() first."); return }
         let x = call.getDouble("x") ?? 0
         let y = call.getDouble("y") ?? 0
         // Pas d'injection UITouch système possible dans une WKWebView externe
@@ -80,16 +80,16 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate {
             if (typeof el.focus === 'function') { el.focus(); }
         })();
         """
-        DispatchQueue.main.async { webView.evaluateJavaScript(js, completionHandler: nil) }
+        DispatchQueue.main.async { vrWebView.evaluateJavaScript(js, completionHandler: nil) }
         call.resolve()
     }
 
     @objc func scrollBy(_ call: CAPPluginCall) {
-        guard let webView = webView else { call.reject("No active webview. Call load() first."); return }
+        guard let vrWebView = webView else { call.reject("No active webview. Call load() first."); return }
         let dx = call.getDouble("dx") ?? 0
         let dy = call.getDouble("dy") ?? 0
         let js = "window.scrollBy({ left: \(dx), top: \(dy), behavior: 'auto' });"
-        DispatchQueue.main.async { webView.evaluateJavaScript(js, completionHandler: nil) }
+        DispatchQueue.main.async { vrWebView.evaluateJavaScript(js, completionHandler: nil) }
         call.resolve()
     }
 
@@ -130,7 +130,7 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate {
         container.addSubview(wv)
         rootView.addSubview(container)
         self.containerView = container
-        self.webView = wv
+        self.vrWebView = wv
 
         wv.load(URLRequest(url: url))
         startCaptureLoop()
@@ -138,11 +138,11 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate {
 
     private func teardown() {
         stopCaptureLoop()
-        webView?.stopLoading()
-        webView?.navigationDelegate = nil
-        webView?.removeFromSuperview()
+        vrWebView?.stopLoading()
+        vrWebView?.navigationDelegate = nil
+        vrWebView?.removeFromSuperview()
         containerView?.removeFromSuperview()
-        webView = nil
+        vrWebView = nil
         containerView = nil
     }
 
@@ -163,7 +163,7 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate {
     }
 
     @objc private func tick(_ link: CADisplayLink) {
-        guard isCapturing, !captureInFlight, let webView = webView else { return }
+        guard isCapturing, !captureInFlight, let vrWebView = webView else { return }
         let interval = 1.0 / targetFPS
         if link.timestamp - lastCaptureTime < interval { return }
         lastCaptureTime = link.timestamp
@@ -173,8 +173,8 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate {
     private func captureFrame(_ webView: WKWebView) {
         captureInFlight = true
         let config = WKSnapshotConfiguration()
-        config.rect = webView.bounds
-        webView.takeSnapshot(with: config) { [weak self] image, error in
+        config.rect = vrWebView.bounds
+        vrWebView.takeSnapshot(with: config) { [weak self] image, error in
             guard let self = self else { return }
             self.captureInFlight = false
             guard let image = image, error == nil else { return }
@@ -191,7 +191,7 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate {
     // MARK: - WKNavigationDelegate
 
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        notifyListeners("loadFinished", data: ["url": webView.url?.absoluteString ?? ""])
+        notifyListeners("loadFinished", data: ["url": vrWebView.url?.absoluteString ?? ""])
     }
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         notifyListeners("loadError", data: ["message": error.localizedDescription])
