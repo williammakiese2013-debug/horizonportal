@@ -167,7 +167,7 @@ public class VRNativeBrowser: CAPPlugin, WKNavigationDelegate {
         let interval = 1.0 / targetFPS
         if link.timestamp - lastCaptureTime < interval { return }
         lastCaptureTime = link.timestamp
-        captureFrame(webView!)
+        captureFrame(customWebView!)
     }
 
     private func captureFrame(_ webView: WKWebView) {
