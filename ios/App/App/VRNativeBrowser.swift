@@ -167,14 +167,14 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate {
         let interval = 1.0 / targetFPS
         if link.timestamp - lastCaptureTime < interval { return }
         lastCaptureTime = link.timestamp
-        captureFrame(webView)
+        captureFrame(webView!)
     }
 
     private func captureFrame(_ webView: WKWebView) {
         captureInFlight = true
         let config = WKSnapshotConfiguration()
-        config.rect = vrWebView.bounds
-        vrWebView.takeSnapshot(with: config) { [weak self] image, error in
+        config.rect = vrWebView!.bounds
+        vrWebView!.takeSnapshot(with: config) { [weak self] image, error in
             guard let self = self else { return }
             self.captureInFlight = false
             guard let image = image, error == nil else { return }
@@ -191,7 +191,7 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate {
     // MARK: - WKNavigationDelegate
 
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        notifyListeners("loadFinished", data: ["url": vrWebView.url?.absoluteString ?? ""])
+        notifyListeners("loadFinished", data: ["url": vrWebView!.url?.absoluteString ?? ""])
     }
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         notifyListeners("loadError", data: ["message": error.localizedDescription])
