@@ -80,7 +80,7 @@ public class VRNativeBrowser: CAPPlugin, WKNavigationDelegate {
             if (typeof el.focus === 'function') { el.focus(); }
         })();
         """
-        DispatchQueue.main.async { customWebView?.evaluateJavaScript(js, completionHandler: nil) }
+        DispatchQueue.main.async { self.customWebView?.evaluateJavaScript(js, completionHandler: nil) }
         call.resolve()
     }
 
@@ -89,7 +89,7 @@ public class VRNativeBrowser: CAPPlugin, WKNavigationDelegate {
         let dx = call.getDouble("dx") ?? 0
         let dy = call.getDouble("dy") ?? 0
         let js = "window.scrollBy({ left: \(dx), top: \(dy), behavior: 'auto' });"
-        DispatchQueue.main.async { customWebView?.evaluateJavaScript(js, completionHandler: nil) }
+        DispatchQueue.main.async { self.customWebView?.evaluateJavaScript(js, completionHandler: nil) }
         call.resolve()
     }
 
