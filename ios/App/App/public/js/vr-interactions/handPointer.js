@@ -15,8 +15,8 @@
     style.id = 'horizon-nav-cursor-style';
     style.textContent = `
       #horizon-nav-cursor{
-        position:fixed; top:0; left:0; width:30px; height:30px;
-        margin:-15px 0 0 -15px; border-radius:50%;
+        position:fixed; top:0; left:0; width:20px; height:20px;
+        margin:-10px 0 0 -10px; border-radius:50%;
         border:2px solid #7fe9ff; background:rgba(127,233,255,.15);
         box-shadow:0 0 14px rgba(127,233,255,.5);
         pointer-events:none; z-index:99999; display:none;
@@ -25,8 +25,8 @@
       #horizon-nav-cursor.hn-tap{ transform:scale(.65); background:rgba(127,233,255,.55); }
       #horizon-nav-cursor.hn-scroll{ border-color:#9dff7f; box-shadow:0 0 14px rgba(157,255,127,.5); }
       #horizon-nav-dwell-ring{
-        position:fixed; top:0; left:0; width:44px; height:44px;
-        margin:-22px 0 0 -22px; border-radius:50%; pointer-events:none;
+        position:fixed; top:0; left:0; width:30px; height:30px;
+        margin:-15px 0 0 -15px; border-radius:50%; pointer-events:none;
         z-index:99998; display:none;
         background:conic-gradient(#7fe9ff calc(var(--p,0) * 360deg), rgba(127,233,255,.12) 0);
         -webkit-mask:radial-gradient(closest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
@@ -78,6 +78,22 @@
     el.click();
   }
 
+  // Panneaux spatiaux world-locked (js/vr-interactions/spatial-panels.js) :
+  // Launchpad et fenêtre d'app (dont "Jeux") sont maintenant projetés sur
+  // de vrais <a-plane> 3D, comme le navigateur web. window.__spatialPanelHitTest
+  // renvoie les coordonnées écran RÉELLES du DOM source (invisible mais
+  // toujours dans le flux, voir main.css) correspondant au point du plan
+  // touché par le rayon : on se contente de remplacer x/y par ce résultat
+  // avant de continuer avec le pipeline normal ci-dessous (elementFromPoint,
+  // __handTrackPinchClick, simulateClick...), sans dupliquer cette logique.
+  function resolveSpatialPanelXY(x, y) {
+    if (typeof window.__spatialPanelHitTest === 'function') {
+      const hit = window.__spatialPanelHitTest(x, y);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
   function handleTap(x, y, cursor) {
     cursor.classList.add('hn-tap');
     setTimeout(() => cursor.classList.remove('hn-tap'), 130);
@@ -95,6 +111,13 @@
         return;
       }
     }
+
+    // Launchpad / fenêtre d'app ("Jeux") world-locked : même principe,
+    // mais le contenu reste du DOM réel (juste invisible à l'écran) donc
+    // on peut remapper x/y vers sa position écran réelle et laisser le
+    // pipeline DOM classique gérer le clic normalement.
+    const spatialXY = resolveSpatialPanelXY(x, y);
+    if (spatialXY) { x = spatialXY.x; y = spatialXY.y; }
 
     // IMPORTANT: read what's under the cursor BEFORE doing anything that
     // can mutate the DOM. Opening an app/window calls renderHUD(), which
@@ -133,6 +156,9 @@
         return;
       }
     }
+
+    const spatialXY = resolveSpatialPanelXY(x, y);
+    if (spatialXY) { x = spatialXY.x; y = spatialXY.y; }
 
     const el = document.elementFromPoint(x, y);
     const target = el ? findScrollTarget(el) : null;

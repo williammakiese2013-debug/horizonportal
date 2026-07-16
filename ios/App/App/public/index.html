@@ -26,6 +26,8 @@
     <script src="js/core/native-media-folder.js"></script>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- ===== UI Spatiale (Vision Pro style) : capture DOM -> texture pour Launchpad / Jeux ===== -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <!-- ===== MediaPipe Tasks Vision (moderne, WASM + délégation GPU) ===== -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
     <link rel="preconnect" href="https://storage.googleapis.com" crossorigin />
@@ -48,9 +50,9 @@
         <a-entity id="camRigL">
         <a-camera id="camL" look-controls="reverseMouseDrag:false;touchEnabled:true;magicWindowTrackingEnabled:true"
         wasd-controls-enabled="false" position="0 1.6 0">
-        <a-entity id="handCursorL" geometry="primitive:sphere;radius:0.032;segmentsWidth:16;segmentsHeight:16"
+        <a-entity id="handCursorL" geometry="primitive:sphere;radius:0.02;segmentsWidth:16;segmentsHeight:16"
           material="color:#ffb84d;shader:flat;opacity:0.95" visible="false"></a-entity>
-        <a-entity id="handCursorRingL" geometry="primitive:ring;radiusInner:0.04;radiusOuter:0.048;segmentsTheta:24"
+        <a-entity id="handCursorRingL" geometry="primitive:ring;radiusInner:0.026;radiusOuter:0.032;segmentsTheta:24"
           material="color:#ffcc66;shader:flat;opacity:0.7;side:double"
           position="0 0 0" visible="false" rotation="0 0 0"></a-entity>
       </a-camera>
@@ -62,6 +64,13 @@
   <!-- ===== Navigateur 3D world-locked (WebView-to-Texture) ===== -->
   <a-plane id="webviewBrowserL" class="clickable" webview-browser-surface="eye: L"
     width="1.6" height="1.05" position="0 1.55 -2.2" visible="false">
+  </a-plane>
+  <!-- ===== Launchpad + fenêtre d'app ("Jeux" inclus) world-locked (DOM-to-Texture) ===== -->
+  <a-plane id="launchpadPanelL" class="clickable" dom-panel-surface="panel: launchpad; eye: L"
+    width="1.8" height="1.35" position="0 1.55 -2.5" visible="false">
+  </a-plane>
+  <a-plane id="appWindowPanelL" class="clickable" dom-panel-surface="panel: appwindow; eye: L"
+    width="1.9" height="1.42" position="0 1.5 -2.3" visible="false">
   </a-plane>
 </a-scene>
 <!-- HUD WORLD-LOCKED -->
@@ -107,9 +116,9 @@
 </a-sky>
 <a-entity id="camRigR">
 <a-camera id="camR" look-controls="enabled:false" wasd-controls-enabled="false" position="0 1.6 0">
-<a-entity id="handCursorR" geometry="primitive:sphere;radius:0.032;segmentsWidth:16;segmentsHeight:16"
+<a-entity id="handCursorR" geometry="primitive:sphere;radius:0.02;segmentsWidth:16;segmentsHeight:16"
   material="color:#ffb84d;shader:flat;opacity:0.95" visible="false"></a-entity>
-<a-entity id="handCursorRingR" geometry="primitive:ring;radiusInner:0.04;radiusOuter:0.048;segmentsTheta:24"
+<a-entity id="handCursorRingR" geometry="primitive:ring;radiusInner:0.026;radiusOuter:0.032;segmentsTheta:24"
   material="color:#ffcc66;shader:flat;opacity:0.7;side:double"
   position="0 0 0" visible="false" rotation="0 0 0"></a-entity>
 </a-camera>
@@ -120,6 +129,13 @@
 <!-- ===== Navigateur 3D world-locked (WebView-to-Texture), miroir de l'œil gauche ===== -->
 <a-plane id="webviewBrowserR" webview-browser-surface="eye: R"
   width="1.6" height="1.05" position="0 1.55 -2.2" visible="false">
+</a-plane>
+<!-- ===== Launchpad + fenêtre d'app ("Jeux" inclus) world-locked, miroir de l'œil gauche ===== -->
+<a-plane id="launchpadPanelR" dom-panel-surface="panel: launchpad; eye: R"
+  width="1.8" height="1.35" position="0 1.55 -2.5" visible="false">
+</a-plane>
+<a-plane id="appWindowPanelR" dom-panel-surface="panel: appwindow; eye: R"
+  width="1.9" height="1.42" position="0 1.5 -2.3" visible="false">
 </a-plane>
 </a-scene>
 <div class="hud-wrap" id="hudWrapR">
@@ -248,6 +264,7 @@
 <!-- vr-browser.js (bulle de navigateur flottante 2D, head-locked) remplacé par un vrai
      navigateur 3D world-locked, rendu dans les deux yeux via WebView-to-Texture. -->
 <script src="js/vr-interactions/webview-browser.js"></script>
+<script src="js/vr-interactions/spatial-panels.js"></script>
 <script src="js/vr-interactions/passthrough.js"></script>
 <script src="js/vr-interactions/hand-tracking-vision.js"></script>
 <script src="js/vr-interactions/handTracking.js"></script>

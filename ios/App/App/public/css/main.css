@@ -75,9 +75,9 @@
   }
   /* Curseur gaze centré */
   .gaze-cursor{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-    width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.85);
+    width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.85);
     background:rgba(255,255,255,.12);pointer-events:none;z-index:50}
-  .gaze-cursor::after{content:"";position:absolute;inset:-6px;border-radius:50%;
+  .gaze-cursor::after{content:"";position:absolute;inset:-4px;border-radius:50%;
     border:2px solid rgba(255,255,255,.95);clip-path:inset(0 100% 0 0)}
   /* Passthrough : vidéo cachée utilisée comme source */
   #passthroughVideo{
@@ -148,6 +148,22 @@
   }
   .hud-wrap{position:absolute;inset:0;perspective:1000px;transform-style:preserve-3d;will-change:transform;pointer-events:none;z-index:10}
   .hud-wrap.interactive{pointer-events:auto}
+  /* ===== UI SPATIALE (Vision Pro style) =====
+     Launchpad et fenêtre d'app (#launchpadWrap*/#appWindowWrap*, qui
+     affiche aussi "Jeux") ne sont plus affichés en 2D "collé caméra"
+     par-dessus l'écran : leur contenu DOM sert uniquement de source de
+     capture (js/vr-interactions/spatial-panels.js) pour peindre une
+     texture sur un vrai <a-plane> world-locked dans la scène 3D. On les
+     rend donc invisibles à l'écran (opacity:0) mais on garde leur
+     transform neutre (pas de fausse profondeur CSS 3D) pour que la
+     capture soit nette et que le mapping clic <-> plan reste fiable via
+     getBoundingClientRect(). */
+  #launchpadWrapL, #launchpadWrapR, #appWindowWrapL, #appWindowWrapR{
+    opacity:0 !important;
+  }
+  #launchpadCenterL, #launchpadCenterR, #appWindowCenterL, #appWindowCenterR{
+    transform:translate(-50%,-50%) !important;
+  }
   /* ===== APPLE MUSIC ===== */
   .am-root{width:900px;display:flex;height:520px;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;color:#fff;background:#0a0a0a;overflow:hidden;border-radius:0 0 22px 22px}
   .am-sidebar{width:200px;background:#111;display:flex;flex-direction:column;padding:0;flex-shrink:0;border-right:1px solid rgba(255,255,255,0.07)}
@@ -1378,14 +1394,14 @@
   /* Curseur VR jeu : croix rouge visible dans les deux yeux via CSS */
   .vrg-cursor-overlay{
     position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-    width:20px;height:20px;pointer-events:none;z-index:8001;
+    width:14px;height:14px;pointer-events:none;z-index:8001;
   }
   .vrg-cursor-overlay::before,.vrg-cursor-overlay::after{
     content:'';position:absolute;background:#ff2244;border-radius:2px;
     transition:background .1s;
   }
-  .vrg-cursor-overlay::before{ width:2px;height:20px;top:0;left:9px; }
-  .vrg-cursor-overlay::after{ width:20px;height:2px;top:9px;left:0; }
+  .vrg-cursor-overlay::before{ width:1.5px;height:14px;top:0;left:6.25px; }
+  .vrg-cursor-overlay::after{ width:14px;height:1.5px;top:6.25px;left:0; }
   .vrg-cursor-overlay.aim{ }
   .vrg-cursor-overlay.aim::before,
   .vrg-cursor-overlay.aim::after{ background:#ff8800; }
