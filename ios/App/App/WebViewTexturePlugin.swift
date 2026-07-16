@@ -69,7 +69,7 @@ private let horizonKeyboardFocusScript = """
 @objc(WebViewTexturePlugin)
 public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate, WKScriptMessageHandler {
 
-    private var webView: WKWebView?
+    private var customWebView: WKWebView?
     private var containerView: UIView?
     private var displayLink: CADisplayLink?
 
@@ -99,7 +99,7 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate, WKScriptMess
     }
 
     @objc func tap(_ call: CAPPluginCall) {
-        guard let webView = webView else { call.reject("No active webview. Call load() first."); return }
+        guard let webView = customWebView else { call.reject("No active webview. Call load() first."); return }
         let x = call.getDouble("x") ?? 0
         let y = call.getDouble("y") ?? 0
         // Pas d'injection UITouch système possible dans une WKWebView externe
@@ -122,7 +122,7 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate, WKScriptMess
     }
 
     @objc func scrollBy(_ call: CAPPluginCall) {
-        guard let webView = webView else { call.reject("No active webview. Call load() first."); return }
+        guard let webView = customWebView else { call.reject("No active webview. Call load() first."); return }
         let dx = call.getDouble("dx") ?? 0
         let dy = call.getDouble("dy") ?? 0
         let js = "window.scrollBy({ left: \(dx), top: \(dy), behavior: 'auto' });"
@@ -136,7 +136,7 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate, WKScriptMess
     // directement en JS (valeur + curseur + événement 'input' pour que les
     // frameworks JS des sites, ex. les suggestions Google, réagissent).
     @objc func typeText(_ call: CAPPluginCall) {
-        guard let webView = webView else { call.reject("No active webview. Call load() first."); return }
+        guard let webView = customWebView else { call.reject("No active webview. Call load() first."); return }
         guard let text = call.getString("text") else { call.reject("Missing 'text'"); return }
         let escaped = text
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -167,7 +167,7 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate, WKScriptMess
     // Actions spéciales du clavier virtuel : effacer / entrée (validation
     // recherche ou formulaire) / espace.
     @objc func keyAction(_ call: CAPPluginCall) {
-        guard let webView = webView else { call.reject("No active webview. Call load() first."); return }
+        guard let webView = customWebView else { call.reject("No active webview. Call load() first."); return }
         let action = call.getString("action") ?? ""
         var js = ""
         switch action {
@@ -211,15 +211,15 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate, WKScriptMess
     }
 
     @objc func goBack(_ call: CAPPluginCall) {
-        DispatchQueue.main.async { [weak self] in self?.webView?.goBack(); call.resolve() }
+        DispatchQueue.main.async { [weak self] in self?.customWebView?.goBack(); call.resolve() }
     }
 
     @objc func goForward(_ call: CAPPluginCall) {
-        DispatchQueue.main.async { [weak self] in self?.webView?.goForward(); call.resolve() }
+        DispatchQueue.main.async { [weak self] in self?.customWebView?.goForward(); call.resolve() }
     }
 
     @objc func reload(_ call: CAPPluginCall) {
-        DispatchQueue.main.async { [weak self] in self?.webView?.reload(); call.resolve() }
+        DispatchQueue.main.async { [weak self] in self?.customWebView?.reload(); call.resolve() }
     }
 
     @objc func setFPS(_ call: CAPPluginCall) {
@@ -279,7 +279,7 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate, WKScriptMess
         container.addSubview(wv)
         rootView.insertSubview(container, at: 0)
         self.containerView = container
-        self.webView = wv
+        self.customWebView = wv
         self.pageDidFinishLoad = false
 
         wv.load(URLRequest(url: url))
@@ -288,12 +288,12 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate, WKScriptMess
 
     private func teardown() {
         stopCaptureLoop()
-        webView?.stopLoading()
-        webView?.navigationDelegate = nil
-        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "horizonKeyboard")
-        webView?.removeFromSuperview()
+        customWebView?.stopLoading()
+        customWebView?.navigationDelegate = nil
+        customWebView?.configuration.userContentController.removeScriptMessageHandler(forName: "horizonKeyboard")
+        customWebView?.removeFromSuperview()
         containerView?.removeFromSuperview()
-        webView = nil
+        customWebView = nil
         containerView = nil
     }
 
@@ -314,7 +314,7 @@ public class WebViewTexturePlugin: CAPPlugin, WKNavigationDelegate, WKScriptMess
     }
 
     @objc private func tick(_ link: CADisplayLink) {
-        guard isCapturing, !captureInFlight, let webView = webView, pageDidFinishLoad else { return }
+        guard isCapturing, !captureInFlight, let webView = customWebView, pageDidFinishLoad else { return }
         let interval = 1.0 / targetFPS
         if link.timestamp - lastCaptureTime < interval { return }
         lastCaptureTime = link.timestamp
